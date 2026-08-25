@@ -1,0 +1,27 @@
+<?php
+
+declare (strict_types=1);
+namespace Masjid_App\Dependencies\CuyZ\Valinor\Mapper\Tree\Exception;
+
+use Masjid_App\Dependencies\CuyZ\Valinor\Mapper\Tree\Message\ErrorMessage;
+use Masjid_App\Dependencies\CuyZ\Valinor\Mapper\Tree\Message\HasCode;
+use Masjid_App\Dependencies\CuyZ\Valinor\Mapper\Tree\Message\HasParameters;
+/** @internal */
+final class HttpRequestKeyCollision implements ErrorMessage, HasCode, HasParameters
+{
+    public function __construct(private string $key)
+    {
+    }
+    public function body(): string
+    {
+        return 'Key `{key}` was found in several HTTP request sources. It must be sent in only one of route, query or body.';
+    }
+    public function code(): string
+    {
+        return 'http_request_keys_collision';
+    }
+    public function parameters(): array
+    {
+        return ['key' => $this->key];
+    }
+}

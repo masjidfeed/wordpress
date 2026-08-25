@@ -1,0 +1,38 @@
+<?php
+
+declare (strict_types=1);
+/*
+ * This file is part of the humbug/php-scoper package.
+ *
+ * Copyright (c) 2017 Théo FIDRY <theo.fidry@gmail.com>,
+ *                    Pádraic Brady <padraic.brady@gmail.com>
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
+ */
+namespace Masjid_App\Dependencies\Humbug\PhpScoper\Console\InputOption;
+
+use Masjid_App\Dependencies\Fidry\Console\IO;
+use Masjid_App\Dependencies\Humbug\PhpScoper\NotInstantiable;
+use Masjid_App\Dependencies\PhpParser\PhpVersion;
+use Masjid_App\Dependencies\Symfony\Component\Console\Input\InputOption;
+/**
+ * @private
+ */
+final class PhpVersionInputOption
+{
+    use NotInstantiable;
+    private const PHP_VERSION_OPT = 'php-version';
+    public static function createInputOption(): InputOption
+    {
+        return new InputOption(self::PHP_VERSION_OPT, null, InputOption::VALUE_REQUIRED, 'PHP version in which the PHP parser and printer will be configured, e.g. "7.2", or "host" for the current PHP version.');
+    }
+    public static function getPhpVersion(IO $io): ?PhpVersion
+    {
+        $version = $io->getTypedOption(self::PHP_VERSION_OPT)->asNullableString();
+        if ('host' === $version) {
+            return PhpVersion::getHostVersion();
+        }
+        return null === $version ? $version : PhpVersion::fromString($version);
+    }
+}

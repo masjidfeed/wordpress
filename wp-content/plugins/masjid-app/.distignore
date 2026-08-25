@@ -1,0 +1,16 @@
+.distignore
+.git
+.github
+.wordpress-org
+composer.json
+composer.lock
+vendor
+vendor/bin
+vendor/composer
+phpunit.xml*
+tests
+vendor/*/.github
+vendor/*/tests
+vendor/*/test
+vendor/*/docs
+vendor/*/*.dist

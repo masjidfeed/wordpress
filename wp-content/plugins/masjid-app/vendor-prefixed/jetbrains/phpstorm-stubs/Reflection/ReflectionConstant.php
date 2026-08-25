@@ -1,0 +1,123 @@
+<?php
+
+namespace Masjid_App\Dependencies;
+
+/**
+ * @since 8.4
+ */
+class ReflectionConstant implements \Reflector
+{
+    public string $name;
+    /**
+     * Constructs a ReflectionConstant
+     *
+     * Constructs a new ReflectionConstant object.
+     *
+     * @link https://php.net/manual/en/reflectionconstant.construct.php
+     * @param string $name The name of the constant.
+     */
+    public function __construct(string $name)
+    {
+    }
+    /**
+     * Gets name
+     *
+     * Gets the name of the constant.
+     *
+     * @link https://php.net/manual/en/reflectionconstant.getname.php
+     * @return string The constants name, which is composed of its namespace and name.
+     */
+    public function getName(): string
+    {
+    }
+    /**
+     * Gets namespace name
+     *
+     * Gets the namespace name of the constant.
+     *
+     * @link https://php.net/manual/en/reflectionconstant.getnamespacename.php
+     * @return string The namespace name, or an empty string for the global namespace.
+     */
+    public function getNamespaceName(): string
+    {
+    }
+    /**
+     * Gets short name
+     *
+     * Gets the short name of the constant, the part without the namespace.
+     *
+     * @link https://php.net/manual/en/reflectionconstant.getshortname.php
+     * @return string The short name of the constant.
+     */
+    public function getShortName(): string
+    {
+    }
+    /**
+     * Gets value
+     *
+     * Gets the value of the constant.
+     *
+     * @link https://php.net/manual/en/reflectionconstant.getvalue.php
+     * @return mixed The value of the constant.
+     */
+    public function getValue(): mixed
+    {
+    }
+    /**
+     * Checks if deprecated
+     *
+     * Checks whether the constant is deprecated.
+     *
+     * @link https://php.net/manual/en/reflectionconstant.isdeprecated.php
+     * @return bool true if it's deprecated, otherwise false
+     */
+    public function isDeprecated(): bool
+    {
+    }
+    /**
+     * Returns string representation
+     *
+     * Returns the string representation of the ReflectionConstant object.
+     *
+     * @link https://php.net/manual/en/reflectionconstant.tostring.php
+     * @return string A string representation of this ReflectionConstant instance.
+     */
+    public function __toString(): string
+    {
+    }
+    /**
+     * @since 8.5
+     */
+    public function getFileName(): string|false
+    {
+    }
+    /**
+     * @since 8.5
+     */
+    public function getExtension(): ?\ReflectionExtension
+    {
+    }
+    /**
+     * @since 8.5
+     */
+    public function getExtensionName(): string|false
+    {
+    }
+    /**
+     * @since 8.5
+     */
+    public function getAttributes(?string $name = null, int $flags = 0): array
+    {
+    }
+    /**
+     * @return bool
+     * @since 8.6
+     */
+    public function inNamespace(): bool
+    {
+    }
+}
+/**
+ * @since 8.4
+ */
+\class_alias('Masjid_App\Dependencies\ReflectionConstant', 'ReflectionConstant', \false);

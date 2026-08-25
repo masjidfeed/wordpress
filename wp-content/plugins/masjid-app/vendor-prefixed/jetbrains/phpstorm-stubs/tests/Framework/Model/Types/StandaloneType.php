@@ -1,0 +1,16 @@
+<?php
+
+namespace Masjid_App\Dependencies\StubTests\Framework\Model\Types;
+
+class StandaloneType
+{
+    private string $typeName;
+    public function __construct(string $typeName)
+    {
+        $this->typeName = $typeName;
+    }
+    public function toString(): string
+    {
+        return $this->typeName;
+    }
+}

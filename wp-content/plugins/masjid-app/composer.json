@@ -1,0 +1,26 @@
+{
+    "name": "bothellmosque/masjid-app",
+    "description": "WordPress backend for the MasjidApp mobile app.",
+    "license": "GPL-2.0-or-later",
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "require": {
+        "kreait/firebase-php": "^7.24"
+    },
+    "require-dev": {
+        "humbug/php-scoper": "^0.18.19"
+    },
+    "scripts": {
+        "build-release": "php scripts/build-release.php"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "platform": {
+            "php": "8.2.0"
+        },
+        "allow-plugins": {
+            "humbug/php-scoper": true
+        }
+    }
+}

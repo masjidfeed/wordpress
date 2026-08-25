@@ -1,0 +1,85 @@
+=== Masjid App ===
+Contributors: icobteam
+Tags: masjid, mobile app, prayer times, events
+Requires at least: 6.0
+Tested up to: 7.0
+Requires PHP: 8.1
+Stable tag: 1.0.0
+License: GPLv2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
+
+The WordPress backend for the MasjidFeed mobile app.
+
+== Description ==
+
+Masjid App is the WordPress-side component of the masjid mobile app: it turns
+this site into the app's content management system. Admins manage the app's
+branding, contact info, donation link, and feature flags, and choose which
+post categories/tags feed the app's Events and Announcements screens. An
+optional category can replace the regular announcement filters on Fridays in
+the WordPress site timezone. These settings are available from the
+**Settings → Masjid App** page, while the app fetches everything over a REST API
+under the `masjid/v1` namespace:
+
+* `/wp-json/masjid/v1/config` — app configuration (branding, contact, feature flags)
+* `/wp-json/masjid/v1/salahapi` — SalahAPI prayer time configuration (proxied from Muslim Prayer Times)
+* `/wp-json/masjid/v1/events` — up to 20 upcoming post objects with event fields
+* `/wp-json/masjid/v1/announcements` — up to 20 announcement post objects
+* `/wp-json/masjid/v1/posts/{id}` — one published post with optional event fields
+* `/wp-json/masjid/v1/push/registrations` — App Check-protected FCM topic registration
+
+Configuration, list, and post responses include ETag and Cache-Control
+headers and cache their rendered payloads using the WordPress Transients API.
+
+Admins can also enable content-only rendering for mobile app web views. When
+enabled, adding `?render=contentOnly` to a published post or page URL removes
+the visual site header and footer while retaining theme styles and scripts.
+Block themes keep their selected template; classic themes use a minimal plugin
+template containing the featured image and content. The `/config`
+response automatically adds this parameter to non-empty donation and Ramadan
+URLs.
+
+It requires the "Awesome Events" and "Muslim Prayer Times" plugins to be
+installed and active, since it builds on their event and prayer-time data
+rather than duplicating it.
+
+== Push Notifications ==
+
+The **Settings → Masjid App → Push Notifications** section accepts a Firebase
+service-account JSON file plus the iOS plist and Android google-services JSON
+for this tenant. The service account is encrypted with Sodium using a
+`MASJIDAPP_CREDENTIAL_KEY` constant or environment variable of at least 32
+characters. The key must not be stored in the WordPress database.
+
+Publishing a post with the configured trigger tag queues one Firebase topic
+notification. Editors may send a tagged, published post again from its editor.
+Post notifications include the post's large featured image when available. The
+image must be publicly accessible over HTTPS. Android displays the FCM image
+directly; iOS requires a Notification Service Extension in the mobile app to
+download and attach the image to the notification.
+Transient Firebase failures retry with backoff, logs are retained for 30 days,
+and a real system cron must invoke WordPress cron reliably.
+
+Administrators can temporarily enable API and push tracing from the settings
+page. The latest 100 Masjid App REST calls and Firebase sends are retained with
+timing and status. REST traces include App Check presence and redacted
+parameters; Firebase traces include the redacted push payload. Disable tracing
+and clear the entries after debugging is complete.
+
+The optional deep-link override supports `{masjidId}`, `{postId}`, `{type}` and
+`{slug}`. Blank uses the built-in event or announcement URL. The Firebase Admin
+SDK is installed from the committed Composer lockfile and vendored for release.
+
+== Release Build ==
+
+The development repository contains Composer manifests and the unscoped vendor
+directory. Run `composer install --no-dev --optimize-autoloader`, then
+`composer install --optimize-autoloader` and `composer run build-release` before
+deploying to WordPress.org. The build prefixes dependencies under
+`Masjid_App\\Dependencies` and produces the self-contained `vendor-prefixed`
+directory used at runtime.
+
+== Changelog ==
+
+= 1.0.0 =
+* Initial release.

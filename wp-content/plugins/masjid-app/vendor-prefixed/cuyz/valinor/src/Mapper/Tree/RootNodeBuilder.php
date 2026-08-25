@@ -1,0 +1,43 @@
+<?php
+
+declare (strict_types=1);
+namespace Masjid_App\Dependencies\CuyZ\Valinor\Mapper\Tree;
+
+use Masjid_App\Dependencies\CuyZ\Valinor\Definition\Attributes;
+use Masjid_App\Dependencies\CuyZ\Valinor\Library\Settings;
+use Masjid_App\Dependencies\CuyZ\Valinor\Mapper\Tree\Builder\Node;
+use Masjid_App\Dependencies\CuyZ\Valinor\Mapper\Tree\Builder\NodeBuilder;
+use Masjid_App\Dependencies\CuyZ\Valinor\Type\Dumper\TypeDumper;
+use Masjid_App\Dependencies\CuyZ\Valinor\Type\Type;
+/** @internal */
+final class RootNodeBuilder
+{
+    public function __construct(private NodeBuilder $nodeBuilder, private TypeDumper $typeDumper, private Settings $settings)
+    {
+    }
+    public function build(mixed $value, Type $type, ?Attributes $attributes = null): Node
+    {
+        $shell = new Shell(
+            name: '',
+            path: '*root*',
+            type: $type,
+            hasValue: \true,
+            value: $value,
+            attributes: $attributes ?? Attributes::empty(),
+            allowCastingToBoolean: $this->settings->allowCastingToBoolean,
+            allowCastingToInteger: $this->settings->allowCastingToInteger,
+            allowCastingToFloat: $this->settings->allowCastingToFloat,
+            allowCastingToString: $this->settings->allowCastingToString,
+            allowUndefinedValues: $this->settings->allowUndefinedValues,
+            allowSuperfluousKeys: $this->settings->allowSuperfluousKeys,
+            allowPermissiveTypes: $this->settings->allowPermissiveTypes,
+            allowedSuperfluousKeys: [],
+            shouldApplyConverters: \true,
+            nodeBuilder: $this->nodeBuilder,
+            typeDumper: $this->typeDumper,
+            // @infection-ignore-all
+            childrenCount: 0
+        );
+        return $shell->build();
+    }
+}
