@@ -1,6 +1,6 @@
 <?php
 /**
- * Settings page for Masjid App
+ * Settings page for MasjidFeed App
  *
  * Stores a single option (MASJIDAPP_OPTION_KEY) holding all admin-configurable
  * values used to build the /config, /events, and /announcements REST
@@ -12,7 +12,8 @@ if (!defined('ABSPATH')) { exit; }
 
 class Masjid_App_Settings {
 
-    const OPTION_GROUP = 'masjidapp_settings_group';
+    const GENERAL_OPTION_GROUP = 'masjidapp_general_group';
+    const PUSH_OPTION_GROUP = 'masjidapp_push_group';
     const PAGE_SLUG = 'masjid-app-settings';
 
     public function __construct() {
@@ -88,8 +89,8 @@ class Masjid_App_Settings {
 
     public function add_settings_page() {
         add_options_page(
-            __('Masjid App Settings', 'masjid-app'),
-            __('Masjid App', 'masjid-app'),
+            __('MasjidFeed App Settings', 'masjid-app'),
+            __('MasjidFeed App', 'masjid-app'),
             'manage_options',
             self::PAGE_SLUG,
             array($this, 'render_settings_page')
@@ -97,11 +98,13 @@ class Masjid_App_Settings {
     }
 
     public function register_settings() {
-        register_setting(self::OPTION_GROUP, MASJIDAPP_OPTION_KEY, array(
+        $args = array(
             'type' => 'array',
             'sanitize_callback' => array($this, 'sanitize_settings'),
             'default' => array(),
-        ));
+        );
+        register_setting(self::GENERAL_OPTION_GROUP, MASJIDAPP_OPTION_KEY, $args);
+        register_setting(self::PUSH_OPTION_GROUP, MASJIDAPP_OPTION_KEY, $args);
     }
 
     public function enqueue_media_scripts($hook) {
@@ -109,7 +112,18 @@ class Masjid_App_Settings {
             return;
         }
         wp_enqueue_media();
+        wp_enqueue_style('wp-color-picker');
+        wp_enqueue_script('wp-color-picker');
         wp_add_inline_script('media-editor', $this->media_picker_js());
+        wp_add_inline_script('wp-color-picker', $this->color_picker_js());
+    }
+
+    private function color_picker_js() {
+        return <<<'JS'
+jQuery(function($) {
+    $('.masjidapp-color-picker').wpColorPicker();
+});
+JS;
     }
 
     private function media_picker_js() {
@@ -137,11 +151,27 @@ JS;
     }
 
     /**
-     * Sanitize the settings array on save.
+     * Sanitize the settings array on save. Only the fields belonging to the
+     * submitted tab are sanitized; fields of the other tab keep their stored
+     * values so each tab can be saved independently.
      */
     public function sanitize_settings($input) {
         $input = is_array($input) ? $input : array();
-        $out = array();
+        $existing = get_option(MASJIDAPP_OPTION_KEY, array());
+        $existing = is_array($existing) ? $existing : array();
+        $tab = isset($input['_tab']) ? sanitize_key(wp_unslash($input['_tab'])) : '';
+
+        if ('push' === $tab) {
+            return $this->sanitize_push_settings($input, $existing);
+        }
+        if ('general' === $tab) {
+            return $this->sanitize_general_settings($input, $existing);
+        }
+        return $existing;
+    }
+
+    private function sanitize_general_settings($input, $existing) {
+        $out = $existing;
 
         $out['masjid_id'] = sanitize_title($input['masjid_id'] ?? '');
         $out['masjid_name'] = sanitize_text_field($input['masjid_name'] ?? '');
@@ -173,7 +203,12 @@ JS;
 
         $out['friday_announcements_category'] = absint($input['friday_announcements_category'] ?? 0);
 
-        $existing = get_option(MASJIDAPP_OPTION_KEY, array());
+        return $out;
+    }
+
+    private function sanitize_push_settings($input, $existing) {
+        $out = $existing;
+
         $out['push_enabled'] = !empty($input['push_enabled']) ? 1 : 0;
         $out['push_tag'] = absint($input['push_tag'] ?? 0);
         $out['push_deep_link_template'] = $this->sanitize_deep_link_template(
@@ -193,300 +228,344 @@ JS;
             return;
         }
 
+        $current_tab = isset($_GET['tab']) ? sanitize_key(wp_unslash($_GET['tab'])) : 'general';
+        if (!in_array($current_tab, array('general', 'push', 'debug'), true)) {
+            $current_tab = 'general';
+        }
+
         $opts = self::get_all_options();
         $categories = get_categories(array('hide_empty' => false));
         $tags = get_tags(array('hide_empty' => false));
         ?>
         <div class="wrap">
-            <h1><?php esc_html_e('Masjid App Settings', 'masjid-app'); ?></h1>
-            <form method="post" action="options.php" enctype="multipart/form-data">
-                <?php settings_fields(self::OPTION_GROUP); ?>
+            <h1><?php esc_html_e('MasjidFeed App Settings', 'masjid-app'); ?></h1>
+            <?php $this->render_notices(); ?>
+            <nav class="nav-tab-wrapper" aria-label="<?php esc_attr_e('MasjidFeed App settings tabs', 'masjid-app'); ?>">
+                <?php
+                $tabs = array(
+                    'general' => __('General', 'masjid-app'),
+                    'push' => __('Push', 'masjid-app'),
+                    'debug' => __('Debug', 'masjid-app'),
+                );
+                foreach ($tabs as $tab => $label) :
+                    $url = add_query_arg('tab', $tab, admin_url('options-general.php?page=' . self::PAGE_SLUG));
+                    ?>
+                    <a href="<?php echo esc_url($url); ?>" class="nav-tab<?php echo $tab === $current_tab ? ' nav-tab-active' : ''; ?>"><?php echo esc_html($label); ?></a>
+                <?php endforeach; ?>
+            </nav>
+            <?php
+            if ('push' === $current_tab) {
+                $this->render_push_tab($opts, $tags);
+            } elseif ('debug' === $current_tab) {
+                $this->render_api_trace_tools();
+                $this->render_firebase_tools();
+                $this->render_recent_deliveries();
+            } else {
+                $this->render_general_tab($opts, $categories, $tags);
+            }
+            ?>
+        </div>
+        <?php
+    }
 
-                <h2><?php esc_html_e('Masjid', 'masjid-app'); ?></h2>
-                <table class="form-table" role="presentation">
-                    <tr>
-                        <th scope="row"><label for="masjidapp_masjid_id"><?php esc_html_e('Masjid ID', 'masjid-app'); ?></label></th>
-                        <td><input type="text" id="masjidapp_masjid_id" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[masjid_id]" value="<?php echo esc_attr($opts['masjid_id']); ?>" class="regular-text" /></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_masjid_name"><?php esc_html_e('Masjid Name', 'masjid-app'); ?></label></th>
-                        <td><input type="text" id="masjidapp_masjid_name" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[masjid_name]" value="<?php echo esc_attr($opts['masjid_name']); ?>" class="regular-text" /></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_timezone"><?php esc_html_e('Timezone', 'masjid-app'); ?></label></th>
-                        <td>
-                            <select id="masjidapp_timezone" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[timezone]">
-                                <?php foreach (DateTimeZone::listIdentifiers() as $tz) : ?>
-                                    <option value="<?php echo esc_attr($tz); ?>" <?php selected($opts['timezone'], $tz); ?>><?php echo esc_html($tz); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </td>
-                    </tr>
-                </table>
+    private function render_general_tab($opts, $categories, $tags) {
+        ?>
+        <form method="post" action="options.php">
+            <?php settings_fields(self::GENERAL_OPTION_GROUP); ?>
+            <input type="hidden" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[_tab]" value="general" />
 
-                <h2><?php esc_html_e('Branding', 'masjid-app'); ?></h2>
-                <table class="form-table" role="presentation">
-                    <tr>
-                        <th scope="row"><label for="masjidapp_logo_id"><?php esc_html_e('Logo', 'masjid-app'); ?></label></th>
-                        <td>
-                            <input type="hidden" id="masjidapp_logo_id" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[logo_id]" value="<?php echo esc_attr($opts['logo_id']); ?>" />
-                            <img id="masjidapp_logo_preview" src="<?php echo esc_url($opts['logo_id'] ? wp_get_attachment_url($opts['logo_id']) : ''); ?>" style="max-height:60px;<?php echo $opts['logo_id'] ? '' : 'display:none;'; ?>" />
-                            <p><button type="button" class="button masjidapp-media-picker" data-target="masjidapp_logo_id" data-preview="masjidapp_logo_preview"><?php esc_html_e('Select Logo', 'masjid-app'); ?></button></p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_splash_id"><?php esc_html_e('Splash Logo', 'masjid-app'); ?></label></th>
-                        <td>
-                            <input type="hidden" id="masjidapp_splash_id" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[splash_id]" value="<?php echo esc_attr($opts['splash_id']); ?>" />
-                            <img id="masjidapp_splash_preview" src="<?php echo esc_url($opts['splash_id'] ? wp_get_attachment_url($opts['splash_id']) : ''); ?>" style="max-height:60px;<?php echo $opts['splash_id'] ? '' : 'display:none;'; ?>" />
-                            <p><button type="button" class="button masjidapp-media-picker" data-target="masjidapp_splash_id" data-preview="masjidapp_splash_preview"><?php esc_html_e('Select Splash Logo', 'masjid-app'); ?></button></p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_primary_color"><?php esc_html_e('Primary Color', 'masjid-app'); ?></label></th>
-                        <td><input type="text" id="masjidapp_primary_color" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[primary_color]" value="<?php echo esc_attr($opts['primary_color']); ?>" class="regular-text" placeholder="#1B7F5C" /></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_primary_color_dark"><?php esc_html_e('Primary Color (Dark Mode)', 'masjid-app'); ?></label></th>
-                        <td><input type="text" id="masjidapp_primary_color_dark" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[primary_color_dark]" value="<?php echo esc_attr($opts['primary_color_dark']); ?>" class="regular-text" placeholder="#3FBF8F" /></td>
-                    </tr>
-                </table>
+            <h2><?php esc_html_e('Masjid', 'masjid-app'); ?></h2>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><label for="masjidapp_masjid_id"><?php esc_html_e('Masjid ID', 'masjid-app'); ?></label></th>
+                    <td><input type="text" id="masjidapp_masjid_id" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[masjid_id]" value="<?php echo esc_attr($opts['masjid_id']); ?>" class="regular-text" /></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_masjid_name"><?php esc_html_e('Masjid Name', 'masjid-app'); ?></label></th>
+                    <td><input type="text" id="masjidapp_masjid_name" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[masjid_name]" value="<?php echo esc_attr($opts['masjid_name']); ?>" class="regular-text" /></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_timezone"><?php esc_html_e('Timezone', 'masjid-app'); ?></label></th>
+                    <td>
+                        <select id="masjidapp_timezone" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[timezone]">
+                            <?php foreach (DateTimeZone::listIdentifiers() as $tz) : ?>
+                                <option value="<?php echo esc_attr($tz); ?>" <?php selected($opts['timezone'], $tz); ?>><?php echo esc_html($tz); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </td>
+                </tr>
+            </table>
 
-                <h2><?php esc_html_e('Contact & Social', 'masjid-app'); ?></h2>
-                <table class="form-table" role="presentation">
-                    <tr>
-                        <th scope="row"><label for="masjidapp_address"><?php esc_html_e('Address', 'masjid-app'); ?></label></th>
-                        <td><input type="text" id="masjidapp_address" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[address]" value="<?php echo esc_attr($opts['address']); ?>" class="regular-text" /></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_phone"><?php esc_html_e('Phone', 'masjid-app'); ?></label></th>
-                        <td><input type="text" id="masjidapp_phone" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[phone]" value="<?php echo esc_attr($opts['phone']); ?>" class="regular-text" /></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_email"><?php esc_html_e('Email', 'masjid-app'); ?></label></th>
-                        <td><input type="email" id="masjidapp_email" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[email]" value="<?php echo esc_attr($opts['email']); ?>" class="regular-text" /></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_website"><?php esc_html_e('Website', 'masjid-app'); ?></label></th>
-                        <td><input type="url" id="masjidapp_website" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[website]" value="<?php echo esc_attr($opts['website']); ?>" class="regular-text" /></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_facebook"><?php esc_html_e('Facebook URL', 'masjid-app'); ?></label></th>
-                        <td><input type="url" id="masjidapp_facebook" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[facebook]" value="<?php echo esc_attr($opts['facebook']); ?>" class="regular-text" /></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_instagram"><?php esc_html_e('Instagram URL', 'masjid-app'); ?></label></th>
-                        <td><input type="url" id="masjidapp_instagram" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[instagram]" value="<?php echo esc_attr($opts['instagram']); ?>" class="regular-text" /></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_whatsapp"><?php esc_html_e('WhatsApp URL', 'masjid-app'); ?></label></th>
-                        <td><input type="url" id="masjidapp_whatsapp" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[whatsapp]" value="<?php echo esc_attr($opts['whatsapp']); ?>" class="regular-text" /></td>
-                    </tr>
-                </table>
+            <h2><?php esc_html_e('Branding', 'masjid-app'); ?></h2>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><label for="masjidapp_logo_id"><?php esc_html_e('Logo', 'masjid-app'); ?></label></th>
+                    <td>
+                        <input type="hidden" id="masjidapp_logo_id" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[logo_id]" value="<?php echo esc_attr($opts['logo_id']); ?>" />
+                        <img id="masjidapp_logo_preview" src="<?php echo esc_url($opts['logo_id'] ? wp_get_attachment_url($opts['logo_id']) : ''); ?>" style="max-height:60px;<?php echo $opts['logo_id'] ? '' : 'display:none;'; ?>" />
+                        <p><button type="button" class="button masjidapp-media-picker" data-target="masjidapp_logo_id" data-preview="masjidapp_logo_preview"><?php esc_html_e('Select Logo', 'masjid-app'); ?></button></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_splash_id"><?php esc_html_e('Splash Logo', 'masjid-app'); ?></label></th>
+                    <td>
+                        <input type="hidden" id="masjidapp_splash_id" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[splash_id]" value="<?php echo esc_attr($opts['splash_id']); ?>" />
+                        <img id="masjidapp_splash_preview" src="<?php echo esc_url($opts['splash_id'] ? wp_get_attachment_url($opts['splash_id']) : ''); ?>" style="max-height:60px;<?php echo $opts['splash_id'] ? '' : 'display:none;'; ?>" />
+                        <p><button type="button" class="button masjidapp-media-picker" data-target="masjidapp_splash_id" data-preview="masjidapp_splash_preview"><?php esc_html_e('Select Splash Logo', 'masjid-app'); ?></button></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_primary_color"><?php esc_html_e('Primary Color', 'masjid-app'); ?></label></th>
+                    <td><input type="text" id="masjidapp_primary_color" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[primary_color]" value="<?php echo esc_attr($opts['primary_color']); ?>" class="masjidapp-color-picker" data-default-color="#1B7F5C" /></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_primary_color_dark"><?php esc_html_e('Primary Color (Dark Mode)', 'masjid-app'); ?></label></th>
+                    <td><input type="text" id="masjidapp_primary_color_dark" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[primary_color_dark]" value="<?php echo esc_attr($opts['primary_color_dark']); ?>" class="masjidapp-color-picker" data-default-color="#3FBF8F" /></td>
+                </tr>
+            </table>
 
-                <h2><?php esc_html_e('Donation', 'masjid-app'); ?></h2>
-                <table class="form-table" role="presentation">
-                    <tr>
-                        <th scope="row"><label for="masjidapp_donation_url"><?php esc_html_e('Donation Page URL', 'masjid-app'); ?></label></th>
-                        <td><input type="url" id="masjidapp_donation_url" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[donation_url]" value="<?php echo esc_attr($opts['donation_url']); ?>" class="regular-text" /></td>
-                    </tr>
-                </table>
+            <h2><?php esc_html_e('Contact & Social', 'masjid-app'); ?></h2>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><label for="masjidapp_address"><?php esc_html_e('Address', 'masjid-app'); ?></label></th>
+                    <td><input type="text" id="masjidapp_address" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[address]" value="<?php echo esc_attr($opts['address']); ?>" class="regular-text" /></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_phone"><?php esc_html_e('Phone', 'masjid-app'); ?></label></th>
+                    <td><input type="text" id="masjidapp_phone" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[phone]" value="<?php echo esc_attr($opts['phone']); ?>" class="regular-text" /></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_email"><?php esc_html_e('Email', 'masjid-app'); ?></label></th>
+                    <td><input type="email" id="masjidapp_email" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[email]" value="<?php echo esc_attr($opts['email']); ?>" class="regular-text" /></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_website"><?php esc_html_e('Website', 'masjid-app'); ?></label></th>
+                    <td><input type="url" id="masjidapp_website" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[website]" value="<?php echo esc_attr($opts['website']); ?>" class="regular-text" /></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_facebook"><?php esc_html_e('Facebook URL', 'masjid-app'); ?></label></th>
+                    <td><input type="url" id="masjidapp_facebook" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[facebook]" value="<?php echo esc_attr($opts['facebook']); ?>" class="regular-text" /></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_instagram"><?php esc_html_e('Instagram URL', 'masjid-app'); ?></label></th>
+                    <td><input type="url" id="masjidapp_instagram" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[instagram]" value="<?php echo esc_attr($opts['instagram']); ?>" class="regular-text" /></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_whatsapp"><?php esc_html_e('WhatsApp URL', 'masjid-app'); ?></label></th>
+                    <td><input type="url" id="masjidapp_whatsapp" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[whatsapp]" value="<?php echo esc_attr($opts['whatsapp']); ?>" class="regular-text" /></td>
+                </tr>
+            </table>
 
-                <h2><?php esc_html_e('Ramadan', 'masjid-app'); ?></h2>
-                <table class="form-table" role="presentation">
-                    <tr>
-                        <th scope="row"><label for="masjidapp_ramadan_url"><?php esc_html_e('Ramadan Page URL', 'masjid-app'); ?></label></th>
-                        <td>
-                            <input type="url" id="masjidapp_ramadan_url" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[ramadan_url]" value="<?php echo esc_attr($opts['ramadan_url']); ?>" class="regular-text" />
-                            <p class="description"><?php esc_html_e('Optional page shown by the mobile app during Ramadan.', 'masjid-app'); ?></p>
-                        </td>
-                    </tr>
-                </table>
+            <h2><?php esc_html_e('Donation', 'masjid-app'); ?></h2>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><label for="masjidapp_donation_url"><?php esc_html_e('Donation Page URL', 'masjid-app'); ?></label></th>
+                    <td><input type="url" id="masjidapp_donation_url" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[donation_url]" value="<?php echo esc_attr($opts['donation_url']); ?>" class="regular-text" /></td>
+                </tr>
+            </table>
 
-                <h2><?php esc_html_e('Feature Flags', 'masjid-app'); ?></h2>
-                <table class="form-table" role="presentation">
-                    <?php
-                    $flags = array(
-                        'feature_events' => __('Events', 'masjid-app'),
-                        'feature_announcements' => __('Announcements', 'masjid-app'),
-                        'feature_donations' => __('Donations', 'masjid-app'),
-                        'feature_qibla' => __('Qibla', 'masjid-app'),
-                        'feature_prayer_reminders' => __('Prayer Reminders', 'masjid-app'),
-                    );
-                    foreach ($flags as $key => $label) :
-                        ?>
-                        <tr>
-                            <th scope="row"><?php echo esc_html($label); ?></th>
-                            <td>
-                                <label>
-                                    <input type="checkbox" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[<?php echo esc_attr($key); ?>]" value="1" <?php checked(!empty($opts[$key])); ?> />
-                                    <?php esc_html_e('Enabled', 'masjid-app'); ?>
-                                </label>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </table>
+            <h2><?php esc_html_e('Ramadan', 'masjid-app'); ?></h2>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><label for="masjidapp_ramadan_url"><?php esc_html_e('Ramadan Page URL', 'masjid-app'); ?></label></th>
+                    <td>
+                        <input type="url" id="masjidapp_ramadan_url" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[ramadan_url]" value="<?php echo esc_attr($opts['ramadan_url']); ?>" class="regular-text" />
+                        <p class="description"><?php esc_html_e('Optional page shown by the mobile app during Ramadan.', 'masjid-app'); ?></p>
+                    </td>
+                </tr>
+            </table>
 
-                <h2><?php esc_html_e('Content-only Rendering', 'masjid-app'); ?></h2>
-                <p class="description"><?php esc_html_e('Allow donation and other pages to render without the site header and footer.', 'masjid-app'); ?></p>
-                <table class="form-table" role="presentation">
+            <h2><?php esc_html_e('Feature Flags', 'masjid-app'); ?></h2>
+            <table class="form-table" role="presentation">
+                <?php
+                $flags = array(
+                    'feature_events' => __('Events', 'masjid-app'),
+                    'feature_announcements' => __('Announcements', 'masjid-app'),
+                    'feature_donations' => __('Donations', 'masjid-app'),
+                    'feature_qibla' => __('Qibla', 'masjid-app'),
+                    'feature_prayer_reminders' => __('Prayer Reminders', 'masjid-app'),
+                );
+                foreach ($flags as $key => $label) :
+                    ?>
                     <tr>
-                        <th scope="row"><?php esc_html_e('Content-only URLs', 'masjid-app'); ?></th>
+                        <th scope="row"><?php echo esc_html($label); ?></th>
                         <td>
                             <label>
-                                <input type="checkbox" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[content_only_rendering_enabled]" value="1" <?php checked(!empty($opts['content_only_rendering_enabled'])); ?> />
-                                <?php esc_html_e('Enable content-only rendering', 'masjid-app'); ?>
+                                <input type="checkbox" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[<?php echo esc_attr($key); ?>]" value="1" <?php checked(!empty($opts[$key])); ?> />
+                                <?php esc_html_e('Enabled', 'masjid-app'); ?>
                             </label>
                         </td>
                     </tr>
-                </table>
+                <?php endforeach; ?>
+            </table>
 
-                <h2><?php esc_html_e('Events Filter', 'masjid-app'); ?></h2>
-                <p class="description"><?php esc_html_e('Only events in the selected categories/tags will be included in the mobile app feed. Leave empty to include all events.', 'masjid-app'); ?></p>
-                <table class="form-table" role="presentation">
-                    <tr>
-                        <th scope="row"><?php esc_html_e('Categories', 'masjid-app'); ?></th>
-                        <td><?php $this->render_term_checkboxes($categories, 'events_categories', $opts['events_categories']); ?></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><?php esc_html_e('Tags', 'masjid-app'); ?></th>
-                        <td><?php $this->render_term_checkboxes($tags, 'events_tags', $opts['events_tags']); ?></td>
-                    </tr>
-                </table>
+            <h2><?php esc_html_e('Content-only Rendering', 'masjid-app'); ?></h2>
+            <p class="description"><?php esc_html_e('Allow donation and other pages to render without the site header and footer.', 'masjid-app'); ?></p>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><?php esc_html_e('Content-only URLs', 'masjid-app'); ?></th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[content_only_rendering_enabled]" value="1" <?php checked(!empty($opts['content_only_rendering_enabled'])); ?> />
+                            <?php esc_html_e('Enable content-only rendering', 'masjid-app'); ?>
+                        </label>
+                    </td>
+                </tr>
+            </table>
 
-                <h2><?php esc_html_e('Announcements Filter', 'masjid-app'); ?></h2>
-                <p class="description"><?php esc_html_e('Only posts in the selected categories/tags will be included as announcements. Leave empty to include all posts.', 'masjid-app'); ?></p>
-                <table class="form-table" role="presentation">
-                    <tr>
-                        <th scope="row"><?php esc_html_e('Categories', 'masjid-app'); ?></th>
-                        <td><?php $this->render_term_checkboxes($categories, 'announcements_categories', $opts['announcements_categories']); ?></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><?php esc_html_e('Tags', 'masjid-app'); ?></th>
-                        <td><?php $this->render_term_checkboxes($tags, 'announcements_tags', $opts['announcements_tags']); ?></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_friday_announcements_category"><?php esc_html_e('Friday Category', 'masjid-app'); ?></label></th>
-                        <td>
-                            <select id="masjidapp_friday_announcements_category" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[friday_announcements_category]">
-                                <option value="0"><?php esc_html_e('Use regular announcement filters', 'masjid-app'); ?></option>
-                                <?php foreach ($categories as $category) : ?>
-                                    <option value="<?php echo (int) $category->term_id; ?>" <?php selected((int) $opts['friday_announcements_category'], (int) $category->term_id); ?>><?php echo esc_html($category->name); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                            <p class="description"><?php esc_html_e('On Fridays, show only posts from this category. Friday follows the WordPress site timezone.', 'masjid-app'); ?></p>
-                        </td>
-                    </tr>
-                </table>
+            <h2><?php esc_html_e('Events Filter', 'masjid-app'); ?></h2>
+            <p class="description"><?php esc_html_e('Only events in the selected categories/tags will be included in the mobile app feed. Leave empty to include all events.', 'masjid-app'); ?></p>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><?php esc_html_e('Categories', 'masjid-app'); ?></th>
+                    <td><?php $this->render_term_checkboxes($categories, 'events_categories', $opts['events_categories']); ?></td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php esc_html_e('Tags', 'masjid-app'); ?></th>
+                    <td><?php $this->render_term_checkboxes($tags, 'events_tags', $opts['events_tags']); ?></td>
+                </tr>
+            </table>
 
-                <hr />
-                <h2 id="push-notifications"><?php esc_html_e('Push Notifications', 'masjid-app'); ?></h2>
-                <p class="description"><?php esc_html_e('Configure Firebase Cloud Messaging for this tenant. Uploaded credentials are validated and the service account is encrypted before storage.', 'masjid-app'); ?></p>
-                <?php if (!Masjid_App_Credential_Store::is_available()) : ?>
-                    <div class="notice notice-warning inline">
-                        <p><strong><?php esc_html_e('Credential encryption is not configured.', 'masjid-app'); ?></strong> <?php esc_html_e('Set MASJIDAPP_CREDENTIAL_KEY as described below before uploading the service-account file.', 'masjid-app'); ?></p>
-                    </div>
-                <?php elseif (Masjid_App_Credential_Store::has_credentials() && is_wp_error(Masjid_App_Credential_Store::get())) : ?>
-                    <div class="notice notice-error inline">
-                        <p><strong><?php esc_html_e('Stored Firebase credentials cannot be decrypted.', 'masjid-app'); ?></strong> <?php esc_html_e('Restore the original MASJIDAPP_CREDENTIAL_KEY or upload the service-account JSON again after intentional key rotation.', 'masjid-app'); ?></p>
-                    </div>
-                <?php endif; ?>
-                <details style="max-width:900px;margin:16px 0;">
-                    <summary><strong><?php esc_html_e('Required files and server configuration', 'masjid-app'); ?></strong></summary>
-                    <div style="padding:8px 0 0 20px;">
-                        <h3><?php esc_html_e('Create the Firebase apps', 'masjid-app'); ?></h3>
-                        <ol>
-                            <li><?php esc_html_e('Open Firebase Console. Create a project named MasjidApp, or open the project already used by MasjidApp.', 'masjid-app'); ?></li>
-                            <li><?php esc_html_e('From Project Overview, choose Add app → Apple. Enter com.goodsoftware.masjidapp for Apple bundle ID and MasjidApp for App nickname. Register the app and download GoogleService-Info.plist.', 'masjid-app'); ?></li>
-                            <li><?php esc_html_e('Return to Project Overview and choose Add app → Android. Enter com.goodsoftware.masjidapp for Android package name and MasjidApp for App nickname. Register the app and download google-services.json.', 'masjid-app'); ?></li>
-                        </ol>
-                        <p><strong><?php esc_html_e('Use these exact identifiers.', 'masjid-app'); ?></strong> <?php esc_html_e('Firebase cannot change a bundle ID or package name after registration. If an existing app uses another identifier, add a new app.', 'masjid-app'); ?></p>
+            <h2><?php esc_html_e('Announcements Filter', 'masjid-app'); ?></h2>
+            <p class="description"><?php esc_html_e('Only posts in the selected categories/tags will be included as announcements. Leave empty to include all posts.', 'masjid-app'); ?></p>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><?php esc_html_e('Categories', 'masjid-app'); ?></th>
+                    <td><?php $this->render_term_checkboxes($categories, 'announcements_categories', $opts['announcements_categories']); ?></td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php esc_html_e('Tags', 'masjid-app'); ?></th>
+                    <td><?php $this->render_term_checkboxes($tags, 'announcements_tags', $opts['announcements_tags']); ?></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_friday_announcements_category"><?php esc_html_e('Friday Category', 'masjid-app'); ?></label></th>
+                    <td>
+                        <select id="masjidapp_friday_announcements_category" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[friday_announcements_category]">
+                            <option value="0"><?php esc_html_e('Use regular announcement filters', 'masjid-app'); ?></option>
+                            <?php foreach ($categories as $category) : ?>
+                                <option value="<?php echo (int) $category->term_id; ?>" <?php selected((int) $opts['friday_announcements_category'], (int) $category->term_id); ?>><?php echo esc_html($category->name); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="description"><?php esc_html_e('On Fridays, show only posts from this category. Friday follows the WordPress site timezone.', 'masjid-app'); ?></p>
+                    </td>
+                </tr>
+            </table>
 
-                        <h3><?php esc_html_e('Configure push delivery', 'masjid-app'); ?></h3>
-                        <ol>
-                            <li><?php esc_html_e('In Firebase, open Project settings → Cloud Messaging. Under Apple app configuration, upload the APNs authentication key from the Apple Developer account and enter its Key ID and Team ID.', 'masjid-app'); ?></li>
-                            <li><?php esc_html_e('Open Project settings → Service accounts → Firebase Admin SDK. Choose Generate new private key, confirm, and keep the downloaded JSON file private.', 'masjid-app'); ?></li>
-                        </ol>
+            <?php submit_button(); ?>
+        </form>
+        <?php
+    }
 
-                        <h3><?php esc_html_e('Enable Firebase App Check', 'masjid-app'); ?></h3>
-                        <p><?php esc_html_e('Complete these cloud-side steps once for each Firebase project and registered app, not once for each WordPress server. If every tenant uses masjidapp-bcfc7 and its existing Apple and Android apps, the setup applies to all of those servers. Repeat it only when a server uses a different Firebase project or app registration.', 'masjid-app'); ?></p>
-                        <ol>
-                            <li><?php esc_html_e('In Google Cloud Console for the Firebase project, enable the Firebase App Check API.', 'masjid-app'); ?></li>
-                            <li><?php esc_html_e('In Firebase, open Security → App Check → Apps. Select the Apple app and register it with the App Attest provider.', 'masjid-app'); ?></li>
-                            <li><?php esc_html_e('In Google Play Console, open Release → App integrity → Play Integrity API and link this Firebase project. Copy the production app-signing SHA-256 fingerprint.', 'masjid-app'); ?></li>
-                            <li><?php esc_html_e('Return to Firebase App Check, select the Android app, choose Play Integrity, and enter the production SHA-256 fingerprint.', 'masjid-app'); ?></li>
-                            <li><?php esc_html_e('Ask the mobile app developer to enable the App Check SDK in both apps and send its token in the X-Firebase-AppCheck header. Without this header, device registration is rejected.', 'masjid-app'); ?></li>
-                        </ol>
-                        <p><?php esc_html_e('For test devices or simulators, the app developer must use the App Check debug provider. Add its debug token from App Check → Apps → Manage debug tokens, and never use that token in a production build.', 'masjid-app'); ?></p>
+    private function render_push_tab($opts, $tags) {
+        ?>
+        <form method="post" action="options.php" enctype="multipart/form-data">
+            <?php settings_fields(self::PUSH_OPTION_GROUP); ?>
+            <input type="hidden" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[_tab]" value="push" />
 
-                        <h3><?php esc_html_e('Server encryption key', 'masjid-app'); ?></h3>
-                        <p><?php esc_html_e('Generate one persistent random value on the WordPress server:', 'masjid-app'); ?></p>
-                        <pre><code>openssl rand -base64 48</code></pre>
-                        <p><?php esc_html_e('Set the result as MASJIDAPP_CREDENTIAL_KEY in the environment used by PHP, then restart PHP or the WordPress container. The plugin reads this environment variable directly.', 'masjid-app'); ?></p>
-                        <pre><code>MASJIDAPP_CREDENTIAL_KEY='generated-value'</code></pre>
-                        <p><?php esc_html_e('If the host cannot provide environment variables, define the value in wp-config.php before the stop-editing line:', 'masjid-app'); ?></p>
-                        <pre><code>define('MASJIDAPP_CREDENTIAL_KEY', 'generated-value');</code></pre>
-                        <p><strong><?php esc_html_e('Store this key in deployment secret management, not in the database or source control, and preserve it across deployments.', 'masjid-app'); ?></strong> <?php esc_html_e('If it is lost or changed, upload the service-account JSON again after configuring the replacement key.', 'masjid-app'); ?></p>
+            <h2 id="push-notifications"><?php esc_html_e('Push Notifications', 'masjid-app'); ?></h2>
+            <p class="description"><?php esc_html_e('Configure Firebase Cloud Messaging for this tenant. Uploaded credentials are validated and the service account is encrypted before storage.', 'masjid-app'); ?></p>
+            <?php if (!Masjid_App_Credential_Store::is_available()) : ?>
+                <div class="notice notice-warning inline">
+                    <p><strong><?php esc_html_e('Credential encryption is not configured.', 'masjid-app'); ?></strong> <?php esc_html_e('Set MASJIDAPP_CREDENTIAL_KEY as described below before uploading the service-account file.', 'masjid-app'); ?></p>
+                </div>
+            <?php elseif (Masjid_App_Credential_Store::has_credentials() && is_wp_error(Masjid_App_Credential_Store::get())) : ?>
+                <div class="notice notice-error inline">
+                    <p><strong><?php esc_html_e('Stored Firebase credentials cannot be decrypted.', 'masjid-app'); ?></strong> <?php esc_html_e('Restore the original MASJIDAPP_CREDENTIAL_KEY or upload the service-account JSON again after intentional key rotation.', 'masjid-app'); ?></p>
+                </div>
+            <?php endif; ?>
+            <details style="max-width:900px;margin:16px 0;">
+                <summary><strong><?php esc_html_e('Required files and server configuration', 'masjid-app'); ?></strong></summary>
+                <div style="padding:8px 0 0 20px;">
+                    <h3><?php esc_html_e('Create the Firebase apps', 'masjid-app'); ?></h3>
+                    <ol>
+                        <li><?php esc_html_e('Open Firebase Console. Create a project named MasjidApp, or open the project already used by MasjidApp.', 'masjid-app'); ?></li>
+                        <li><?php esc_html_e('From Project Overview, choose Add app → Apple. Enter com.goodsoftware.masjidapp for Apple bundle ID and MasjidApp for App nickname. Register the app and download GoogleService-Info.plist.', 'masjid-app'); ?></li>
+                        <li><?php esc_html_e('Return to Project Overview and choose Add app → Android. Enter com.goodsoftware.masjidapp for Android package name and MasjidApp for App nickname. Register the app and download google-services.json.', 'masjid-app'); ?></li>
+                    </ol>
+                    <p><strong><?php esc_html_e('Use these exact identifiers.', 'masjid-app'); ?></strong> <?php esc_html_e('Firebase cannot change a bundle ID or package name after registration. If an existing app uses another identifier, add a new app.', 'masjid-app'); ?></p>
 
-                        <h3><?php esc_html_e('Finish setup', 'masjid-app'); ?></h3>
-                        <ol>
-                            <li><?php esc_html_e('Upload the service-account JSON, iOS plist, and Android google-services JSON below. All files must use the same Firebase project ID.', 'masjid-app'); ?></li>
-                            <li><?php esc_html_e('Save settings, choose Validate connection, then paste a current device FCM token and send a test notification.', 'masjid-app'); ?></li>
-                            <li><?php esc_html_e('For reliable queued delivery, configure the host scheduler to invoke WordPress cron instead of relying only on site traffic.', 'masjid-app'); ?></li>
-                        </ol>
-                    </div>
-                </details>
-                <table class="form-table" role="presentation">
-                    <tr>
-                        <th scope="row"><?php esc_html_e('Enable push notifications', 'masjid-app'); ?></th>
-                        <td><label><input type="checkbox" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[push_enabled]" value="1" <?php checked(!empty($opts['push_enabled'])); ?> /> <?php esc_html_e('Register devices and send notifications', 'masjid-app'); ?></label></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_push_tag"><?php esc_html_e('Trigger tag', 'masjid-app'); ?></label></th>
-                        <td>
-                            <select id="masjidapp_push_tag" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[push_tag]">
-                                <option value="0"><?php esc_html_e('Select a tag', 'masjid-app'); ?></option>
-                                <?php foreach ($tags as $tag) : ?>
-                                    <option value="<?php echo (int) $tag->term_id; ?>" <?php selected((int) $opts['push_tag'], (int) $tag->term_id); ?>><?php echo esc_html($tag->name); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                            <p class="description"><?php esc_html_e('A post sends once when first published with this tag. Tagged published posts can also be sent manually.', 'masjid-app'); ?></p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_push_deep_link_template"><?php esc_html_e('Deep-link override', 'masjid-app'); ?></label></th>
-                        <td>
-                            <input type="text" id="masjidapp_push_deep_link_template" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[push_deep_link_template]" value="<?php echo esc_attr($opts['push_deep_link_template']); ?>" class="large-text code" placeholder="masjidapp://open/v1/masjids/{masjidId}/{type}/{postId}" />
-                            <p class="description"><?php esc_html_e('Optional. Supports {masjidId}, {postId}, {type}, and {slug}. Any URI scheme is allowed; leave blank for the built-in event or announcement link.', 'masjid-app'); ?></p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_service_account"><?php esc_html_e('Service account JSON', 'masjid-app'); ?></label></th>
-                        <td>
-                            <input type="file" id="masjidapp_service_account" name="masjidapp_service_account" accept="application/json,.json" />
-                            <p class="description"><?php echo Masjid_App_Credential_Store::has_credentials() ? esc_html__('Configured. Upload another file to rotate it.', 'masjid-app') : esc_html__('Not configured.', 'masjid-app'); ?></p>
-                            <?php if (Masjid_App_Credential_Store::has_credentials()) : ?><label><input type="checkbox" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[remove_firebase_credentials]" value="1" /> <?php esc_html_e('Remove stored service account', 'masjid-app'); ?></label><?php endif; ?>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_ios_config"><?php esc_html_e('iOS Firebase plist', 'masjid-app'); ?></label></th>
-                        <td><input type="file" id="masjidapp_ios_config" name="masjidapp_ios_config" accept="application/xml,.plist" /><p class="description"><?php echo !empty($opts['firebase_ios_config']) ? esc_html__('Configured.', 'masjid-app') : esc_html__('Not configured.', 'masjid-app'); ?></p></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="masjidapp_android_config"><?php esc_html_e('Android google-services.json', 'masjid-app'); ?></label></th>
-                        <td><input type="file" id="masjidapp_android_config" name="masjidapp_android_config" accept="application/json,.json" /><p class="description"><?php echo !empty($opts['firebase_android_config']) ? esc_html__('Configured.', 'masjid-app') : esc_html__('Not configured.', 'masjid-app'); ?></p></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><?php esc_html_e('Firebase project', 'masjid-app'); ?></th>
-                        <td><code><?php echo esc_html($opts['firebase_project_id'] ?: __('Not configured', 'masjid-app')); ?></code><p class="description"><?php esc_html_e('All three uploaded files must belong to this project.', 'masjid-app'); ?></p></td>
-                    </tr>
-                </table>
+                    <h3><?php esc_html_e('Configure push delivery', 'masjid-app'); ?></h3>
+                    <ol>
+                        <li><?php esc_html_e('In Firebase, open Project settings → Cloud Messaging. Under Apple app configuration, upload the APNs authentication key from the Apple Developer account and enter its Key ID and Team ID.', 'masjid-app'); ?></li>
+                        <li><?php esc_html_e('Open Project settings → Service accounts → Firebase Admin SDK. Choose Generate new private key, confirm, and keep the downloaded JSON file private.', 'masjid-app'); ?></li>
+                    </ol>
 
-                <?php submit_button(); ?>
-            </form>
+                    <h3><?php esc_html_e('Enable Firebase App Check', 'masjid-app'); ?></h3>
+                    <p><?php esc_html_e('Complete these cloud-side steps once for each Firebase project and registered app, not once for each WordPress server. If every tenant uses masjidapp-bcfc7 and its existing Apple and Android apps, the setup applies to all of those servers. Repeat it only when a server uses a different Firebase project or app registration.', 'masjid-app'); ?></p>
+                    <ol>
+                        <li><?php esc_html_e('In Google Cloud Console for the Firebase project, enable the Firebase App Check API.', 'masjid-app'); ?></li>
+                        <li><?php esc_html_e('In Firebase, open Security → App Check → Apps. Select the Apple app and register it with the App Attest provider.', 'masjid-app'); ?></li>
+                        <li><?php esc_html_e('In Google Play Console, open Release → App integrity → Play Integrity API and link this Firebase project. Copy the production app-signing SHA-256 fingerprint.', 'masjid-app'); ?></li>
+                        <li><?php esc_html_e('Return to Firebase App Check, select the Android app, choose Play Integrity, and enter the production SHA-256 fingerprint.', 'masjid-app'); ?></li>
+                        <li><?php esc_html_e('Ask the mobile app developer to enable the App Check SDK in both apps and send its token in the X-Firebase-AppCheck header. Without this header, device registration is rejected.', 'masjid-app'); ?></li>
+                    </ol>
+                    <p><?php esc_html_e('For test devices or simulators, the app developer must use the App Check debug provider. Add its debug token from App Check → Apps → Manage debug tokens, and never use that token in a production build.', 'masjid-app'); ?></p>
 
-            <?php $this->render_push_tools(); ?>
-        </div>
+                    <h3><?php esc_html_e('Server encryption key', 'masjid-app'); ?></h3>
+                    <p><?php esc_html_e('Generate one persistent random value on the WordPress server:', 'masjid-app'); ?></p>
+                    <pre><code>openssl rand -base64 48</code></pre>
+                    <p><?php esc_html_e('Set the result as MASJIDAPP_CREDENTIAL_KEY in the environment used by PHP, then restart PHP or the WordPress container. The plugin reads this environment variable directly.', 'masjid-app'); ?></p>
+                    <pre><code>MASJIDAPP_CREDENTIAL_KEY='generated-value'</code></pre>
+                    <p><?php esc_html_e('If the host cannot provide environment variables, define the value in wp-config.php before the stop-editing line:', 'masjid-app'); ?></p>
+                    <pre><code>define('MASJIDAPP_CREDENTIAL_KEY', 'generated-value');</code></pre>
+                    <p><strong><?php esc_html_e('Store this key in deployment secret management, not in the database or source control, and preserve it across deployments.', 'masjid-app'); ?></strong> <?php esc_html_e('If it is lost or changed, upload the service-account JSON again after configuring the replacement key.', 'masjid-app'); ?></p>
+
+                    <h3><?php esc_html_e('Finish setup', 'masjid-app'); ?></h3>
+                    <ol>
+                        <li><?php esc_html_e('Upload the service-account JSON, iOS plist, and Android google-services JSON below. All files must use the same Firebase project ID.', 'masjid-app'); ?></li>
+                        <li><?php esc_html_e('Save settings, choose Validate connection, then paste a current device FCM token and send a test notification.', 'masjid-app'); ?></li>
+                        <li><?php esc_html_e('For reliable queued delivery, configure the host scheduler to invoke WordPress cron instead of relying only on site traffic.', 'masjid-app'); ?></li>
+                    </ol>
+                </div>
+            </details>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><?php esc_html_e('Enable push notifications', 'masjid-app'); ?></th>
+                    <td><label><input type="checkbox" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[push_enabled]" value="1" <?php checked(!empty($opts['push_enabled'])); ?> /> <?php esc_html_e('Register devices and send notifications', 'masjid-app'); ?></label></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_push_tag"><?php esc_html_e('Trigger tag', 'masjid-app'); ?></label></th>
+                    <td>
+                        <select id="masjidapp_push_tag" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[push_tag]">
+                            <option value="0"><?php esc_html_e('Select a tag', 'masjid-app'); ?></option>
+                            <?php foreach ($tags as $tag) : ?>
+                                <option value="<?php echo (int) $tag->term_id; ?>" <?php selected((int) $opts['push_tag'], (int) $tag->term_id); ?>><?php echo esc_html($tag->name); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="description"><?php esc_html_e('A post sends once when first published with this tag. Tagged published posts can also be sent manually.', 'masjid-app'); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_push_deep_link_template"><?php esc_html_e('Deep-link override', 'masjid-app'); ?></label></th>
+                    <td>
+                        <input type="text" id="masjidapp_push_deep_link_template" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[push_deep_link_template]" value="<?php echo esc_attr($opts['push_deep_link_template']); ?>" class="large-text code" placeholder="masjidapp://open/v1/masjids/{masjidId}/{type}/{postId}" />
+                        <p class="description"><?php esc_html_e('Optional. Supports {masjidId}, {postId}, {type}, and {slug}. Any URI scheme is allowed; leave blank for the built-in event or announcement link.', 'masjid-app'); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_service_account"><?php esc_html_e('Service account JSON', 'masjid-app'); ?></label></th>
+                    <td>
+                        <input type="file" id="masjidapp_service_account" name="masjidapp_service_account" accept="application/json,.json" />
+                        <p class="description"><?php echo Masjid_App_Credential_Store::has_credentials() ? esc_html__('Configured. Upload another file to rotate it.', 'masjid-app') : esc_html__('Not configured.', 'masjid-app'); ?></p>
+                        <?php if (Masjid_App_Credential_Store::has_credentials()) : ?><label><input type="checkbox" name="<?php echo esc_attr(MASJIDAPP_OPTION_KEY); ?>[remove_firebase_credentials]" value="1" /> <?php esc_html_e('Remove stored service account', 'masjid-app'); ?></label><?php endif; ?>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_ios_config"><?php esc_html_e('iOS Firebase plist', 'masjid-app'); ?></label></th>
+                    <td><input type="file" id="masjidapp_ios_config" name="masjidapp_ios_config" accept="application/xml,.plist" /><p class="description"><?php echo !empty($opts['firebase_ios_config']) ? esc_html__('Configured.', 'masjid-app') : esc_html__('Not configured.', 'masjid-app'); ?></p></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidapp_android_config"><?php esc_html_e('Android google-services.json', 'masjid-app'); ?></label></th>
+                    <td><input type="file" id="masjidapp_android_config" name="masjidapp_android_config" accept="application/json,.json" /><p class="description"><?php echo !empty($opts['firebase_android_config']) ? esc_html__('Configured.', 'masjid-app') : esc_html__('Not configured.', 'masjid-app'); ?></p></td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php esc_html_e('Firebase project', 'masjid-app'); ?></th>
+                    <td><code><?php echo esc_html($opts['firebase_project_id'] ?: __('Not configured', 'masjid-app')); ?></code><p class="description"><?php esc_html_e('All three uploaded files must belong to this project.', 'masjid-app'); ?></p></td>
+                </tr>
+            </table>
+
+            <?php submit_button(); ?>
+        </form>
         <?php
     }
 
@@ -548,7 +627,7 @@ JS;
         }
         try {
             (new Masjid_App_Firebase())->send_test($token, array(
-                'title' => __('Masjid App test notification', 'masjid-app'),
+                'title' => __('MasjidFeed App test notification', 'masjid-app'),
                 'body' => __('Firebase push notifications are configured.', 'masjid-app'),
                 'data' => array(
                     'notificationId' => wp_generate_uuid4(),
@@ -713,8 +792,10 @@ JS;
         return array('appId' => $app_id, 'senderId' => (string) $project['project_number'], 'projectId' => $project['project_id'], 'apiKey' => $api_key, 'packageName' => $package);
     }
 
-    private function render_push_tools() {
-        global $wpdb;
+    private function render_notices() {
+        if (!empty($_GET['settings-updated'])) {
+            echo '<div class="notice notice-success"><p>' . esc_html__('Settings saved.', 'masjid-app') . '</p></div>';
+        }
         $notice = sanitize_text_field(wp_unslash($_GET['masjidapp_notice'] ?? ''));
         $notice_type = sanitize_key($_GET['masjidapp_notice_type'] ?? 'success');
         if ($notice) {
@@ -728,7 +809,9 @@ JS;
             );
             echo '<div class="notice notice-' . esc_attr('error' === $notice_type ? 'error' : 'success') . '"><p>' . esc_html($messages[$notice] ?? rawurldecode($notice)) . '</p></div>';
         }
-        $this->render_api_trace_tools();
+    }
+
+    private function render_firebase_tools() {
         ?>
         <h3><?php esc_html_e('Firebase tools', 'masjid-app'); ?></h3>
         <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block;margin-right:8px;">
@@ -741,6 +824,12 @@ JS;
             <input type="text" class="large-text code" id="masjidapp_test_token" name="fcm_token" autocomplete="off" />
             <?php submit_button(__('Send test notification', 'masjid-app'), 'secondary', 'submit', false); ?>
         </form>
+        <?php
+    }
+
+    private function render_recent_deliveries() {
+        global $wpdb;
+        ?>
         <h3><?php esc_html_e('Recent deliveries', 'masjid-app'); ?></h3>
         <?php
         $table = $wpdb->prefix . 'masjidapp_push_jobs';
@@ -772,7 +861,7 @@ JS;
         <h3><?php esc_html_e('API and push traces', 'masjid-app'); ?></h3>
         <p>
             <strong><?php echo $enabled ? esc_html__('Enabled.', 'masjid-app') : esc_html__('Disabled.', 'masjid-app'); ?></strong>
-            <?php esc_html_e('Captures the latest 100 Masjid App API calls and Firebase sends, including timing, status, redacted parameters, and push payloads. Disable tracing when debugging is complete.', 'masjid-app'); ?>
+            <?php esc_html_e('Captures the latest 100 MasjidFeed App API calls and Firebase sends, including timing, status, redacted parameters, and push payloads. Disable tracing when debugging is complete.', 'masjid-app'); ?>
         </p>
         <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block;margin-right:8px;">
             <input type="hidden" name="action" value="masjidapp_toggle_api_tracing" />
@@ -819,7 +908,7 @@ JS;
 
     private function authorize_push_action($nonce_action) {
         if (!current_user_can('manage_options') || !check_admin_referer($nonce_action)) {
-            wp_die(esc_html__('You are not allowed to manage Masjid App settings.', 'masjid-app'));
+            wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjid-app'));
         }
     }
 

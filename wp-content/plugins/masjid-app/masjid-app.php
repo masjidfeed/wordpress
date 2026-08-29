@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: Masjid App
+ * Plugin Name: MasjidFeed App
  * Plugin URI: https://bothellmosque.org
- * Description: WordPress backend for the MasjidApp mobile app. Powers the app's config, prayer times, events, and announcements over a REST API.
+ * Description: WordPress backend for the MasjidFeed mobile app. Powers the app's config, prayer times, events, and announcements over a REST API.
  * Version: 1.0.0
  * Author: ICOB Team
  * Author URI: https://bothellmosque.org
@@ -141,7 +141,7 @@ class Masjid_App_Plugin {
             '<div class="notice notice-error"><p>%s</p></div>',
             esc_html(sprintf(
                 /* translators: %s: comma separated list of missing plugin names */
-                __('Masjid App requires the following plugin(s) to be active: %s', 'masjid-app'),
+                __('MasjidFeed App requires the following plugin(s) to be active: %s', 'masjid-app'),
                 implode(', ', $missing)
             ))
         );

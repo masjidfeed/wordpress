@@ -1,4 +1,4 @@
-=== Masjid App ===
+=== MasjidFeed App ===
 Contributors: icobteam
 Tags: masjid, mobile app, prayer times, events
 Requires at least: 6.0
@@ -12,13 +12,13 @@ The WordPress backend for the MasjidFeed mobile app.
 
 == Description ==
 
-Masjid App is the WordPress-side component of the masjid mobile app: it turns
+MasjidFeed App is the WordPress-side component of the masjid mobile app: it turns
 this site into the app's content management system. Admins manage the app's
 branding, contact info, donation link, and feature flags, and choose which
 post categories/tags feed the app's Events and Announcements screens. An
 optional category can replace the regular announcement filters on Fridays in
 the WordPress site timezone. These settings are available from the
-**Settings → Masjid App** page, while the app fetches everything over a REST API
+**Settings → MasjidFeed App** page, while the app fetches everything over a REST API
 under the `masjid/v1` namespace:
 
 * `/wp-json/masjid/v1/config` — app configuration (branding, contact, feature flags)
@@ -45,7 +45,7 @@ rather than duplicating it.
 
 == Push Notifications ==
 
-The **Settings → Masjid App → Push Notifications** section accepts a Firebase
+The **Settings → MasjidFeed App → Push Notifications** section accepts a Firebase
 service-account JSON file plus the iOS plist and Android google-services JSON
 for this tenant. The service account is encrypted with Sodium using a
 `MASJIDAPP_CREDENTIAL_KEY` constant or environment variable of at least 32
@@ -61,7 +61,7 @@ Transient Firebase failures retry with backoff, logs are retained for 30 days,
 and a real system cron must invoke WordPress cron reliably.
 
 Administrators can temporarily enable API and push tracing from the settings
-page. The latest 100 Masjid App REST calls and Firebase sends are retained with
+page. The latest 100 MasjidFeed App REST calls and Firebase sends are retained with
 timing and status. REST traces include App Check presence and redacted
 parameters; Firebase traces include the redacted push payload. Disable tracing
 and clear the entries after debugging is complete.

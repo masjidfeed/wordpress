@@ -46,7 +46,7 @@ class Masjid_App_Firebase {
 
     public function validate() {
         $payload = array(
-            'title' => __('Masjid App Firebase validation', 'masjid-app'),
+            'title' => __('MasjidFeed App Firebase validation', 'masjid-app'),
             'body' => __('Configuration validated successfully.', 'masjid-app'),
             'data' => array('type' => 'validation'),
         );

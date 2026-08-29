@@ -144,7 +144,7 @@ class Masjid_App_Push_Notifications {
     }
 
     public function add_meta_box() {
-        add_meta_box('masjidapp-push', __('Masjid App Push', 'masjid-app'), array($this, 'render_meta_box'), 'post', 'side');
+        add_meta_box('masjidapp-push', __('MasjidFeed App Push', 'masjid-app'), array($this, 'render_meta_box'), 'post', 'side');
     }
 
     public function render_meta_box($post) {
