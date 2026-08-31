@@ -12,6 +12,8 @@ wp-content/plugins/image-prioritizer*
 wp-content/plugins/muslim-prayer-times*
 wp-content/plugins/optimization-detective*
 wp-content/plugins/masjid-app/vendor/
+/vendor/
+.phpunit.cache/
 wp-content/plugins/performance*
 wp-content/plugins/performant*
 wp-content/plugins/plugin-check/*
@@ -29,4 +31,5 @@ wp-content/updraft*
 wp-content/object-cache.php
 wp-content/debug.log
 
+/dist/
 .DS_Store

@@ -67,8 +67,10 @@ class WP_Error {
 
 $GLOBALS['__test_transients'] = array();
 
-require_once dirname(__DIR__) . '/vendor-prefixed/autoload.php';
-require_once dirname(__DIR__) . '/includes/class-firebase-exceptions.php';
-require_once dirname(__DIR__) . '/includes/class-firebase-client.php';
-require_once dirname(__DIR__) . '/includes/class-firebase.php';
-require_once dirname(__DIR__) . '/includes/class-push-notifications.php';
+$plugin_dir = dirname(__DIR__) . '/wp-content/plugins/masjid-app';
+
+require_once $plugin_dir . '/vendor-prefixed/autoload.php';
+require_once $plugin_dir . '/includes/class-firebase-exceptions.php';
+require_once $plugin_dir . '/includes/class-firebase-client.php';
+require_once $plugin_dir . '/includes/class-firebase.php';
+require_once $plugin_dir . '/includes/class-push-notifications.php';
