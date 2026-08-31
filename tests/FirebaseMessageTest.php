@@ -6,15 +6,15 @@ require_once __DIR__ . '/support.php';
 
 class FirebaseMessageTest extends FirebaseClientTestCase {
 
-    private Masjid_App_Firebase $firebase;
+    private Masjid_Feed_Firebase $firebase;
 
     protected function setUp(): void {
         parent::setUp();
-        $this->firebase = (new ReflectionClass(Masjid_App_Firebase::class))->newInstanceWithoutConstructor();
+        $this->firebase = (new ReflectionClass(Masjid_Feed_Firebase::class))->newInstanceWithoutConstructor();
     }
 
     private function message(string $target_type, string $target, array $payload): array {
-        $reflection = new ReflectionMethod(Masjid_App_Firebase::class, 'message');
+        $reflection = new ReflectionMethod(Masjid_Feed_Firebase::class, 'message');
         return $reflection->invoke($this->firebase, $target_type, $target, $payload);
     }
 

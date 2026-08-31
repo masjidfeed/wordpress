@@ -109,7 +109,7 @@ define( 'WP_DEBUG', !!getenv_docker('WORDPRESS_DEBUG', '') );
 define( 'WP_DEBUG_LOG', !!getenv_docker('WORDPRESS_DEBUG', '') ? '/var/www/html/wp-content/debug.log' : false );
 define( 'WP_DEBUG_DISPLAY', false );
 
-define( 'MASJIDAPP_CREDENTIAL_KEY', 'test-UX77+CgCN3bPHFeehsOyYc08ILeugMP74tuQAqS9GGg0THSqleAHJjoCzU6juvNL' );
+define( 'MASJIDFEED_CREDENTIAL_KEY', 'test-UX77+CgCN3bPHFeehsOyYc08ILeugMP74tuQAqS9GGg0THSqleAHJjoCzU6juvNL' );
 
 /* Add any custom values between this line and the "stop editing" line. */
 

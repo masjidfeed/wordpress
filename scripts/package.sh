@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# Packages the masjid-app plugin into a distributable zip in dist/.
+# Packages the masjidfeed-app plugin into a distributable zip in dist/.
 #
 # Usage: scripts/package.sh
 #
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-plugin_slug="masjid-app"
+plugin_slug="masjidfeed-app"
 plugin_dir="$root_dir/wp-content/plugins/$plugin_slug"
 
 cd "$root_dir"

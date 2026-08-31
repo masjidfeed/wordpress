@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# Runs the PHPUnit test suite for the masjid-app plugin.
+# Runs the PHPUnit test suite for the masjidfeed-app plugin.
 #
 # Usage: scripts/test.sh [phpunit arguments...]
 #
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-plugin_dir="$root_dir/wp-content/plugins/masjid-app"
+plugin_dir="$root_dir/wp-content/plugins/masjidfeed-app"
 
 cd "$root_dir"
 

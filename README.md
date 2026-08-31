@@ -13,10 +13,10 @@ Stop the environment with `docker-compose down`.
 
 ## MasjidFeed App plugin
 
-The plugin lives in `wp-content/plugins/masjid-app` and ships only runtime code; development tooling lives at the repository root.
+The plugin lives in `wp-content/plugins/masjidfeed-app` and ships only runtime code; development tooling lives at the repository root.
 
 ```sh
 composer install          # install build dependencies (php-scoper) and firebase/php-jwt
-composer build-release    # regenerate wp-content/plugins/masjid-app/vendor-prefixed
+composer build-release    # regenerate wp-content/plugins/masjidfeed-app/vendor-prefixed
 phpunit                   # run the test suite
 ```

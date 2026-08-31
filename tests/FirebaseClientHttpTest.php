@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/support.php';
 
-use Masjid_App\Dependencies\Firebase\JWT\JWT;
+use Masjid_Feed\Dependencies\Firebase\JWT\JWT;
 
 class FirebaseClientHttpTest extends FirebaseClientTestCase {
 
     public function test_missing_service_account_fields_throw(): void {
-        $this->expectException(Masjid_App_Firebase_Exception::class);
-        new Masjid_App_Firebase_Client([], fn() => []);
+        $this->expectException(Masjid_Feed_Firebase_Exception::class);
+        new Masjid_Feed_Firebase_Client([], fn() => []);
     }
 
     public function test_access_token_signs_service_account_jwt_and_caches(): void {
@@ -27,29 +27,29 @@ class FirebaseClientHttpTest extends FirebaseClientTestCase {
 
         $request = $captured[0];
         $this->assertSame('POST', $request['method']);
-        $this->assertSame(Masjid_App_Firebase_Client::OAUTH_TOKEN_URL, $request['url']);
+        $this->assertSame(Masjid_Feed_Firebase_Client::OAUTH_TOKEN_URL, $request['url']);
         $this->assertSame('urn:ietf:params:oauth:grant-type:jwt-bearer', $request['options']['body']['grant_type']);
         $this->assertArrayHasKey('assertion', $request['options']['body']);
 
         $assertion = $request['options']['body']['assertion'];
-        $key = new Masjid_App\Dependencies\Firebase\JWT\Key($this->public_key_from_pem($this->private_key_pem()), 'RS256');
+        $key = new Masjid_Feed\Dependencies\Firebase\JWT\Key($this->public_key_from_pem($this->private_key_pem()), 'RS256');
         $claims = JWT::decode($assertion, $key);
         $this->assertSame('firebase-adminsdk@masjid-test.iam.gserviceaccount.com', $claims->iss);
         $this->assertSame($claims->iss, $claims->sub);
-        $this->assertSame(Masjid_App_Firebase_Client::OAUTH_TOKEN_URL, $claims->aud);
+        $this->assertSame(Masjid_Feed_Firebase_Client::OAUTH_TOKEN_URL, $claims->aud);
         $this->assertStringContainsString('firebase.messaging', $claims->scope);
-        $this->assertSame(3540, $this->cache_ttl[Masjid_App_Firebase_Client::TOKEN_CACHE_KEY]);
+        $this->assertSame(3540, $this->cache_ttl[Masjid_Feed_Firebase_Client::TOKEN_CACHE_KEY]);
     }
 
     public function test_access_token_http_error_throws_authentication_error(): void {
         $client = $this->new_client($this->transport(401, [], json_encode(['error' => 'invalid_grant'])));
-        $this->expectException(Masjid_App_Firebase_Authentication_Error::class);
+        $this->expectException(Masjid_Feed_Firebase_Authentication_Error::class);
         $client->access_token();
     }
 
     public function test_access_token_missing_token_in_response_throws(): void {
         $client = $this->new_client($this->transport(200, [], json_encode(['expires_in' => 3600])));
-        $this->expectException(Masjid_App_Firebase_Authentication_Error::class);
+        $this->expectException(Masjid_Feed_Firebase_Authentication_Error::class);
         $client->access_token();
     }
 
@@ -107,20 +107,20 @@ class FirebaseClientHttpTest extends FirebaseClientTestCase {
 
     public function test_malformed_json_response_throws_server_error(): void {
         $client = $this->token_cached_client($this->transport(200, [], 'not-json'));
-        $this->expectException(Masjid_App_Firebase_Server_Error::class);
+        $this->expectException(Masjid_Feed_Firebase_Server_Error::class);
         $client->send_message(['message' => ['topic' => 't']]);
     }
 
     public static function status_exception_provider(): array {
         return [
-            'bad request' => [400, Masjid_App_Firebase_Invalid_Message::class, false],
-            'unauthorized' => [401, Masjid_App_Firebase_Authentication_Error::class, false],
-            'forbidden' => [403, Masjid_App_Firebase_Authentication_Error::class, false],
-            'not found' => [404, Masjid_App_Firebase_Not_Found::class, false],
-            'quota' => [429, Masjid_App_Firebase_Quota_Exceeded::class, true],
-            'server error' => [500, Masjid_App_Firebase_Server_Error::class, true],
-            'unavailable' => [503, Masjid_App_Firebase_Server_Unavailable::class, true],
-            'unknown' => [418, Masjid_App_Firebase_Exception::class, false],
+            'bad request' => [400, Masjid_Feed_Firebase_Invalid_Message::class, false],
+            'unauthorized' => [401, Masjid_Feed_Firebase_Authentication_Error::class, false],
+            'forbidden' => [403, Masjid_Feed_Firebase_Authentication_Error::class, false],
+            'not found' => [404, Masjid_Feed_Firebase_Not_Found::class, false],
+            'quota' => [429, Masjid_Feed_Firebase_Quota_Exceeded::class, true],
+            'server error' => [500, Masjid_Feed_Firebase_Server_Error::class, true],
+            'unavailable' => [503, Masjid_Feed_Firebase_Server_Unavailable::class, true],
+            'unknown' => [418, Masjid_Feed_Firebase_Exception::class, false],
         ];
     }
 
@@ -134,7 +134,7 @@ class FirebaseClientHttpTest extends FirebaseClientTestCase {
         try {
             $client->send_message(['message' => ['topic' => 't']]);
             $this->fail('Expected an exception.');
-        } catch (Masjid_App_Firebase_Exception $exception) {
+        } catch (Masjid_Feed_Firebase_Exception $exception) {
             $this->assertInstanceOf($class, $exception);
             $this->assertSame($retryable, $exception->is_retryable());
             $this->assertStringContainsString('Boom', $exception->getMessage());
@@ -149,7 +149,7 @@ class FirebaseClientHttpTest extends FirebaseClientTestCase {
         try {
             $client->send_message(['message' => ['topic' => 't']]);
             $this->fail('Expected an exception.');
-        } catch (Masjid_App_Firebase_Quota_Exceeded $exception) {
+        } catch (Masjid_Feed_Firebase_Quota_Exceeded $exception) {
             $this->assertSame(120, $exception->retry_after());
         }
     }
@@ -161,7 +161,7 @@ class FirebaseClientHttpTest extends FirebaseClientTestCase {
         try {
             $client->send_message(['message' => ['topic' => 't']]);
             $this->fail('Expected an exception.');
-        } catch (Masjid_App_Firebase_Server_Unavailable $exception) {
+        } catch (Masjid_Feed_Firebase_Server_Unavailable $exception) {
             $this->assertNotNull($exception->retry_after());
             $this->assertGreaterThan(0, $exception->retry_after());
             $this->assertLessThanOrEqual(90, $exception->retry_after());
@@ -175,7 +175,7 @@ class FirebaseClientHttpTest extends FirebaseClientTestCase {
         try {
             $client->send_message(['message' => ['topic' => 't']]);
             $this->fail('Expected an exception.');
-        } catch (Masjid_App_Firebase_Quota_Exceeded $exception) {
+        } catch (Masjid_Feed_Firebase_Quota_Exceeded $exception) {
             $this->assertSame(45, $exception->retry_after());
         }
     }
@@ -187,7 +187,7 @@ class FirebaseClientHttpTest extends FirebaseClientTestCase {
         try {
             $client->send_message(['message' => ['topic' => 't']]);
             $this->fail('Expected an exception.');
-        } catch (Masjid_App_Firebase_Server_Error $exception) {
+        } catch (Masjid_Feed_Firebase_Server_Error $exception) {
             $this->assertNull($exception->retry_after());
         }
     }

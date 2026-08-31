@@ -25,9 +25,9 @@ class FirebaseClientTestCase extends TestCase {
         };
     }
 
-    protected function new_client(?callable $transport = null, array $preloaded_cache = [], array $service_account = []): Masjid_App_Firebase_Client {
+    protected function new_client(?callable $transport = null, array $preloaded_cache = [], array $service_account = []): Masjid_Feed_Firebase_Client {
         $cache = $preloaded_cache;
-        return new Masjid_App_Firebase_Client(
+        return new Masjid_Feed_Firebase_Client(
             $service_account ?: $this->service_account(),
             $transport ?? $this->transport(),
             function (string $key) use (&$cache) {
@@ -41,10 +41,10 @@ class FirebaseClientTestCase extends TestCase {
         );
     }
 
-    protected function token_cached_client(callable $transport): Masjid_App_Firebase_Client {
+    protected function token_cached_client(callable $transport): Masjid_Feed_Firebase_Client {
         return $this->new_client(
             $transport,
-            [Masjid_App_Firebase_Client::TOKEN_CACHE_KEY => 'tok-123']
+            [Masjid_Feed_Firebase_Client::TOKEN_CACHE_KEY => 'tok-123']
         );
     }
 

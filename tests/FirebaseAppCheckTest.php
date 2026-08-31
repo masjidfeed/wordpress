@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/support.php';
 
-use Masjid_App\Dependencies\Firebase\JWT\JWT;
+use Masjid_Feed\Dependencies\Firebase\JWT\JWT;
 
 class FirebaseAppCheckTest extends FirebaseClientTestCase {
 
@@ -14,13 +14,13 @@ class FirebaseAppCheckTest extends FirebaseClientTestCase {
     private int $jwks_fetch_count = 0;
     private string $jwks_kid = self::KID;
 
-    protected function new_app_check_client(): Masjid_App_Firebase_Client {
+    protected function new_app_check_client(): Masjid_Feed_Firebase_Client {
         $cache = [];
-        $client = new Masjid_App_Firebase_Client(
+        $client = new Masjid_Feed_Firebase_Client(
             $this->service_account(),
             function (string $method, string $url, array $options) {
                 $this->requests[] = compact('method', 'url', 'options');
-                if ('GET' === $method && Masjid_App_Firebase_Client::APP_CHECK_JWKS_URL === $url) {
+                if ('GET' === $method && Masjid_Feed_Firebase_Client::APP_CHECK_JWKS_URL === $url) {
                     $this->jwks_fetch_count++;
                     return ['status' => 200, 'headers' => [], 'body' => json_encode($this->jwks())];
                 }
@@ -115,33 +115,33 @@ class FirebaseAppCheckTest extends FirebaseClientTestCase {
 
     public function test_wrong_audience_is_rejected(): void {
         $client = $this->new_app_check_client();
-        $this->expectException(Masjid_App_Firebase_Failed_Verify_App_Check_Token::class);
+        $this->expectException(Masjid_Feed_Firebase_Failed_Verify_App_Check_Token::class);
         $this->expectExceptionMessage('aud');
         $client->verify_app_check_token($this->make_token(overrides: ['aud' => ['projects/other-project']]));
     }
 
     public function test_wrong_issuer_is_rejected(): void {
         $client = $this->new_app_check_client();
-        $this->expectException(Masjid_App_Firebase_Failed_Verify_App_Check_Token::class);
+        $this->expectException(Masjid_Feed_Firebase_Failed_Verify_App_Check_Token::class);
         $this->expectExceptionMessage('iss');
         $client->verify_app_check_token($this->make_token(overrides: ['iss' => 'https://evil.example.com/']));
     }
 
     public function test_expired_token_is_rejected(): void {
         $client = $this->new_app_check_client();
-        $this->expectException(Masjid_App_Firebase_Invalid_App_Check_Token::class);
+        $this->expectException(Masjid_Feed_Firebase_Invalid_App_Check_Token::class);
         $client->verify_app_check_token($this->make_token(overrides: ['exp' => time() - 600, 'iat' => time() - 1200]));
     }
 
     public function test_wrong_signing_key_is_rejected(): void {
         $client = $this->new_app_check_client();
-        $this->expectException(Masjid_App_Firebase_Failed_Verify_App_Check_Token::class);
+        $this->expectException(Masjid_Feed_Firebase_Failed_Verify_App_Check_Token::class);
         $client->verify_app_check_token($this->make_token(kid: 'other-kid', pem: $this->alt_key_pem));
     }
 
     public function test_malformed_token_is_rejected(): void {
         $client = $this->new_app_check_client();
-        $this->expectException(Masjid_App_Firebase_Failed_Verify_App_Check_Token::class);
+        $this->expectException(Masjid_Feed_Firebase_Failed_Verify_App_Check_Token::class);
         $client->verify_app_check_token('not-a-jwt');
     }
 
@@ -149,13 +149,13 @@ class FirebaseAppCheckTest extends FirebaseClientTestCase {
         $this->jwks_kid = 'unfetched';
         $client = $this->new_app_check_client();
         // Bypass the JWKS endpoint by pointing the transport at a failing response.
-        $client = new Masjid_App_Firebase_Client(
+        $client = new Masjid_Feed_Firebase_Client(
             $this->service_account(),
             fn () => ['status' => 500, 'headers' => [], 'body' => '{}'],
             fn () => false,
             fn () => true
         );
-        $this->expectException(Masjid_App_Firebase_Failed_Verify_App_Check_Token::class);
+        $this->expectException(Masjid_Feed_Firebase_Failed_Verify_App_Check_Token::class);
         $client->verify_app_check_token($this->make_token('unfetched-kid'));
     }
 }

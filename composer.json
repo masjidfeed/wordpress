@@ -1,6 +1,6 @@
 {
-    "name": "bothellmosque/masjid-app",
-    "description": "WordPress backend for the MasjidApp mobile app.",
+    "name": "bothellmosque/masjidfeed-app",
+    "description": "WordPress backend for the MasjidFeed mobile app.",
     "license": "GPL-2.0-or-later",
     "minimum-stability": "dev",
     "prefer-stable": true,
