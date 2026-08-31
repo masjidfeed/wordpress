@@ -53,16 +53,12 @@ return [
                 'test',
                 'docs',
                 'qa',
-                'humbug',
-                'fidry',
-                'jetbrains',
-                'nikic',
-                'thecodingmachine',
-                'webmozart',
             ])
-            ->in('vendor'),
+            ->in([
+                'vendor/composer',
+                'vendor/firebase',
+            ]),
     ],
-
     // List of excluded files, i.e. files for which the content will be left untouched.
     // Paths are relative to the configuration file unless if they are already absolute
     //

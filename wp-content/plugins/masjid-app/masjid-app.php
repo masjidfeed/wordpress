@@ -88,6 +88,8 @@ class Masjid_App_Plugin {
     private function load_includes() {
         require_once MASJIDAPP_PLUGIN_DIR . 'vendor-prefixed/autoload.php';
         require_once MASJIDAPP_PLUGIN_DIR . 'includes/class-credential-store.php';
+        require_once MASJIDAPP_PLUGIN_DIR . 'includes/class-firebase-exceptions.php';
+        require_once MASJIDAPP_PLUGIN_DIR . 'includes/class-firebase-client.php';
         require_once MASJIDAPP_PLUGIN_DIR . 'includes/class-firebase.php';
         require_once MASJIDAPP_PLUGIN_DIR . 'includes/class-push-notifications.php';
         require_once MASJIDAPP_PLUGIN_DIR . 'includes/class-api-trace.php';

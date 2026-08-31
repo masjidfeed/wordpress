@@ -1,8 +1,0 @@
-<?php
-
-namespace MyApp\Valid;
-
-class GoodClass
-{
-    public function ok(): void {}
-}

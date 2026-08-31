@@ -1,8 +1,0 @@
-<?php
-
-/**
- * Extensions versioned independently of PHP put their own version in this slot.
- *
- * @deprecated 2.3.0 use g() instead
- */
-function f(): void {}

@@ -233,15 +233,13 @@ class Masjid_App_Push_Notifications {
     }
 
     private function is_retryable($exception) {
-        return $exception instanceof Masjid_App\Dependencies\Kreait\Firebase\Exception\Messaging\ApiConnectionFailed
-            || $exception instanceof Masjid_App\Dependencies\Kreait\Firebase\Exception\Messaging\QuotaExceeded
-            || $exception instanceof Masjid_App\Dependencies\Kreait\Firebase\Exception\Messaging\ServerError
-            || $exception instanceof Masjid_App\Dependencies\Kreait\Firebase\Exception\Messaging\ServerUnavailable;
+        return $exception instanceof Masjid_App_Firebase_Exception && $exception->is_retryable();
     }
 
     private function get_retry_delay($exception, $attempts) {
-        if (method_exists($exception, 'retryAfter') && $exception->retryAfter()) {
-            return max(MINUTE_IN_SECONDS, $exception->retryAfter()->getTimestamp() - time());
+        $retry_after = $exception instanceof Masjid_App_Firebase_Exception ? $exception->retry_after() : null;
+        if ($retry_after && $retry_after > 0) {
+            return max(MINUTE_IN_SECONDS, $retry_after);
         }
         return min(HOUR_IN_SECONDS, (2 ** $attempts) * MINUTE_IN_SECONDS);
     }

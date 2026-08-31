@@ -1,39 +1,36 @@
 <?php
 /**
- * Firebase Admin SDK gateway.
+ * Firebase gateway built on the lightweight Masjid_App_Firebase_Client.
  */
 
 if (!defined('ABSPATH')) { exit; }
 
-use Masjid_App\Dependencies\Kreait\Firebase\Factory;
-use Masjid_App\Dependencies\Kreait\Firebase\Messaging\CloudMessage;
-
 class Masjid_App_Firebase {
 
-    private $factory;
+    private $client;
 
     public function __construct() {
         $credentials = Masjid_App_Credential_Store::get();
         if (is_wp_error($credentials)) {
             throw new RuntimeException($credentials->get_error_message());
         }
-        $this->factory = (new Factory())->withServiceAccount($credentials);
+        $this->client = new Masjid_App_Firebase_Client($credentials);
     }
 
     public function verify_app_check($token, array $allowed_app_ids) {
-        $verified = $this->factory->createAppCheck()->verifyToken($token);
-        if (!in_array($verified->appId, $allowed_app_ids, true)) {
+        $verified = $this->client->verify_app_check_token($token);
+        if (!in_array($verified['app_id'], $allowed_app_ids, true)) {
             throw new RuntimeException(__('The App Check token belongs to an unconfigured Firebase application.', 'masjid-app'));
         }
-        return $verified->appId;
+        return $verified['app_id'];
     }
 
     public function subscribe($token) {
-        return $this->factory->createMessaging()->subscribeToTopic($this->topic(), $token);
+        return $this->client->subscribe_to_topic($this->topic(), $token);
     }
 
     public function unsubscribe($token) {
-        return $this->factory->createMessaging()->unsubscribeFromTopic($this->topic(), $token);
+        return $this->client->unsubscribe_from_topic($this->topic(), $token);
     }
 
     public function send_topic(array $payload) {
@@ -50,13 +47,13 @@ class Masjid_App_Firebase {
             'body' => __('Configuration validated successfully.', 'masjid-app'),
             'data' => array('type' => 'validation'),
         );
-        return $this->factory->createMessaging()->send($this->message('topic', $this->topic(), $payload), true);
+        return $this->client->send_message($this->message('topic', $this->topic(), $payload), true);
     }
 
     private function send($target_type, $target, array $payload) {
         $started_at = microtime(true);
         try {
-            $result = $this->factory->createMessaging()->send($this->message($target_type, $target, $payload));
+            $result = $this->client->send_message($this->message($target_type, $target, $payload));
             $this->trace_push($target_type, $payload, 200, $started_at);
             return $result;
         } catch (Throwable $exception) {
@@ -75,7 +72,7 @@ class Masjid_App_Firebase {
         }
     }
 
-    private function message($target_type, $target, array $payload) {
+    private function message($target_type, $target, array $payload): array {
         $notification = array(
             'title' => (string) $payload['title'],
             'body' => (string) $payload['body'],
@@ -85,16 +82,18 @@ class Masjid_App_Firebase {
             $notification['image'] = $image_url;
         }
 
-        $message = CloudMessage::withTarget($target_type, $target)
-            ->withNotification($notification)
-            ->withData(array_map('strval', $payload['data']));
+        $message = array(
+            'data' => array_map('strval', $payload['data']),
+            'notification' => $notification,
+        );
+        $message[$target_type] = $target;
         if ('' !== $image_url) {
-            $message = $message->withApnsConfig(array(
+            $message['apns'] = array(
                 'payload' => array('aps' => array('mutable-content' => 1)),
                 'fcm_options' => array('image' => $image_url),
-            ));
+            );
         }
-        return $message;
+        return array('message' => $message);
     }
 
     private function topic() {

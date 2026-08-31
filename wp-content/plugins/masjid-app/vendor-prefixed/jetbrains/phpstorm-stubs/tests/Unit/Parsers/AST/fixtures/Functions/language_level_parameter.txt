@@ -1,5 +1,0 @@
-<?php
-
-use JetBrains\PhpStorm\Internal\LanguageLevelTypeAware;
-
-function test_function(#[LanguageLevelTypeAware(['8.0' => 'string'], default: '')] $param): void {}

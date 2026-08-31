@@ -5,7 +5,7 @@
     "minimum-stability": "dev",
     "prefer-stable": true,
     "require": {
-        "kreait/firebase-php": "^7.24"
+        "firebase/php-jwt": "^7.0"
     },
     "require-dev": {
         "humbug/php-scoper": "^0.18.19"
