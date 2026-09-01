@@ -71,6 +71,7 @@ class Masjid_Feed_Push_Notifications {
         }
 
         $now = current_time('mysql', true);
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- insert into the custom queue table; dedupe is enforced by a unique key.
         $inserted = $wpdb->insert(
             $wpdb->prefix . 'masjidfeed_push_jobs',
             array(
@@ -98,11 +99,14 @@ class Masjid_Feed_Push_Notifications {
     public function process_job($job_id) {
         global $wpdb;
         $table = $wpdb->prefix . 'masjidfeed_push_jobs';
-        $job = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE id = %d", $job_id));
+        $sql = sprintf('SELECT * FROM %s WHERE id = %%d', esc_sql($table));
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- custom queue table; the row must be read fresh to claim the job safely. The table name is built from a fixed identifier and the parameter is prepared.
+        $job = $wpdb->get_row($wpdb->prepare($sql, $job_id));
         if (!$job || !in_array($job->status, array('pending', 'retry'), true)) {
             return;
         }
 
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- status transition on the custom queue table.
         $claimed = $wpdb->update($table, array('status' => 'sending', 'updated_at' => current_time('mysql', true)), array('id' => $job_id, 'status' => $job->status));
         if (!$claimed) {
             return;
@@ -111,6 +115,7 @@ class Masjid_Feed_Push_Notifications {
         try {
             $payload = json_decode($job->payload, true, 512, JSON_THROW_ON_ERROR);
             $result = (new Masjid_Feed_Firebase())->send_topic($payload);
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- status transition on the custom queue table.
             $wpdb->update($table, array(
                 'status' => 'sent',
                 'attempts' => (int) $job->attempts + 1,
@@ -124,6 +129,7 @@ class Masjid_Feed_Push_Notifications {
             $retry = $attempts < self::MAX_ATTEMPTS && $this->is_retryable($exception);
             $delay = $this->get_retry_delay($exception, $attempts);
             $next = gmdate('Y-m-d H:i:s', time() + $delay);
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- status transition on the custom queue table.
             $wpdb->update($table, array(
                 'status' => $retry ? 'retry' : 'failed',
                 'attempts' => $attempts,
@@ -139,8 +145,9 @@ class Masjid_Feed_Push_Notifications {
 
     public function cleanup_jobs() {
         global $wpdb;
-        $table = $wpdb->prefix . 'masjidfeed_push_jobs';
-        $wpdb->query("DELETE FROM $table WHERE created_at < (UTC_TIMESTAMP() - INTERVAL 30 DAY)");
+        $sql = sprintf('DELETE FROM %s WHERE created_at < (UTC_TIMESTAMP() - INTERVAL 30 DAY)', esc_sql($wpdb->prefix . 'masjidfeed_push_jobs'));
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- scheduled bulk purge of the custom queue table; the table name is built from a fixed identifier and there are no parameters to prepare.
+        $wpdb->query($sql);
     }
 
     public function add_meta_box() {
@@ -180,6 +187,7 @@ class Masjid_Feed_Push_Notifications {
             wp_die(esc_html__('You are not allowed to retry this notification.', 'masjidfeed-app'));
         }
         global $wpdb;
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- status transition on the custom queue table.
         $wpdb->update($wpdb->prefix . 'masjidfeed_push_jobs', array('status' => 'retry', 'next_attempt_at' => current_time('mysql', true)), array('id' => $job_id, 'status' => 'failed'));
         wp_schedule_single_event(time(), 'masjidfeed_process_push_job', array($job_id));
         wp_safe_redirect(admin_url('options-general.php?page=' . Masjid_Feed_Settings::PAGE_SLUG));
@@ -211,7 +219,7 @@ class Masjid_Feed_Push_Notifications {
             '{type}' => rawurlencode($type),
             '{slug}' => rawurlencode($post->post_name),
         ));
-        $source = '' !== trim($post->post_excerpt) ? $post->post_excerpt : wp_strip_all_tags(apply_filters('the_content', $post->post_content));
+        $source = '' !== trim($post->post_excerpt) ? $post->post_excerpt : wp_strip_all_tags(apply_filters('the_content', $post->post_content)); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- applying a core WordPress filter.
         $source = html_entity_decode($source, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $body = wp_html_excerpt(preg_replace('/\s+/', ' ', $source), 180, '...');
         $payload = array(

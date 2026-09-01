@@ -12,6 +12,7 @@ class Masjid_Feed_Firebase {
     public function __construct() {
         $credentials = Masjid_Feed_Credential_Store::get();
         if (is_wp_error($credentials)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
             throw new RuntimeException($credentials->get_error_message());
         }
         $this->client = new Masjid_Feed_Firebase_Client($credentials);
@@ -20,6 +21,7 @@ class Masjid_Feed_Firebase {
     public function verify_app_check($token, array $allowed_app_ids) {
         $verified = $this->client->verify_app_check_token($token);
         if (!in_array($verified['app_id'], $allowed_app_ids, true)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- static translated string; never rendered unescaped.
             throw new RuntimeException(__('The App Check token belongs to an unconfigured Firebase application.', 'masjidfeed-app'));
         }
         return $verified['app_id'];

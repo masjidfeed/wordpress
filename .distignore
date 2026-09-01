@@ -2,6 +2,7 @@
 .git
 .github
 .wordpress-org
+api.md
 composer.json
 composer.lock
 vendor

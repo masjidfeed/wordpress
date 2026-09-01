@@ -39,6 +39,7 @@ class Masjid_Feed_Firebase_Client {
     ) {
         foreach (array('project_id', 'client_email', 'private_key') as $field) {
             if (empty($service_account[$field])) {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- static format with whitelisted field name; never rendered unescaped.
                 throw new Masjid_Feed_Firebase_Exception(sprintf('The Firebase service account is missing the "%s" field.', $field));
             }
         }
@@ -52,6 +53,7 @@ class Masjid_Feed_Firebase_Client {
     public function wordpress_transport(string $method, string $url, array $options): array {
         $response = wp_remote_request($url, $options);
         if (is_wp_error($response)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
             throw new Masjid_Feed_Firebase_Api_Connection_Failed($response->get_error_message());
         }
         $headers = array();
@@ -88,10 +90,12 @@ class Masjid_Feed_Firebase_Client {
             ),
         ));
         if ($response['status'] >= 400) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- message from a remote API response; any display escapes it.
             throw new Masjid_Feed_Firebase_Authentication_Error($this->error_message($response, 'Could not fetch a Firebase OAuth access token.'));
         }
         $data = json_decode($response['body'], true);
         if (empty($data['access_token'])) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- message from a remote API response; any display escapes it.
             throw new Masjid_Feed_Firebase_Authentication_Error($this->error_message($response, 'The OAuth token response did not contain an access token.'));
         }
         ($this->cache_set)(self::TOKEN_CACHE_KEY, (string) $data['access_token'], max(60, (int) ($data['expires_in'] ?? 3600) - 60));
@@ -143,8 +147,10 @@ class Masjid_Feed_Firebase_Client {
         try {
             $decoded = JWT::decode($token, $keys);
         } catch (ExpiredException | BeforeValidException $exception) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- rethrown JWT library exception; any display escapes the message.
             throw new Masjid_Feed_Firebase_Invalid_App_Check_Token($exception->getMessage(), 0, $exception);
         } catch (Throwable $exception) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- rethrown library exception; any display escapes the message.
             throw new Masjid_Feed_Firebase_Failed_Verify_App_Check_Token($exception->getMessage(), 0, $exception);
         }
         $payload = array(
@@ -169,6 +175,7 @@ class Masjid_Feed_Firebase_Client {
         if (!is_string($jwks_json) || '' === $jwks_json) {
             $response = ($this->transport)('GET', self::APP_CHECK_JWKS_URL, array('timeout' => self::REQUEST_TIMEOUT));
             if ($response['status'] >= 400) {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- message from a remote API response; any display escapes it.
                 throw new Masjid_Feed_Firebase_Failed_Verify_App_Check_Token($this->error_message($response, 'Could not fetch the App Check public keys.'));
             }
             $jwks_json = $response['body'];
@@ -181,6 +188,7 @@ class Masjid_Feed_Firebase_Client {
         try {
             return JWK::parseKeySet($parsed, 'RS256');
         } catch (Throwable $exception) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- rethrown library exception; any display escapes the message.
             throw new Masjid_Feed_Firebase_Failed_Verify_App_Check_Token($exception->getMessage(), 0, $exception);
         }
     }
@@ -209,10 +217,12 @@ class Masjid_Feed_Firebase_Client {
 
     private function decode_json(array $response): array {
         if ($response['status'] >= 400) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- message from a remote API response; any display escapes it.
             throw $this->exception_for_response($response);
         }
         $data = json_decode($response['body'], true);
         if (!is_array($data)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- message from a remote API response; any display escapes it.
             throw new Masjid_Feed_Firebase_Server_Error($this->error_message($response, 'The Firebase API returned a malformed JSON response.'));
         }
         return $data;

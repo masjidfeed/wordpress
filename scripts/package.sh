@@ -32,7 +32,7 @@ staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/$plugin_slug.XXXXXX")"
 trap 'rm -rf "$staging_dir"' EXIT
 
 rsync -a --delete-excluded \
-    --exclude-from="$plugin_dir/.distignore" \
+    --exclude-from="$root_dir/.distignore" \
     --exclude='.DS_Store' \
     "$plugin_dir/" "$staging_dir/$plugin_slug/"
 

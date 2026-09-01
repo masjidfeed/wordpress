@@ -50,4 +50,4 @@ A few identifiers are contracts with systems outside WordPress and must not be r
 
 - The mobile app deep-link URI scheme `masjidapp://` (used in push notification payloads and tests).
 - The Firebase bundle ID `com.goodsoftware.masjidapp` and Firebase project names referenced in setup documentation.
-- The REST API response field names consumed by the mobile app (documented in `wp-content/plugins/masjidfeed-app/api.md`).
+- The REST API response field names consumed by the mobile app (documented in `api.md` at the repository root).

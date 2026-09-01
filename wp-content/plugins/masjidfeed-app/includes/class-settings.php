@@ -15,6 +15,7 @@ class Masjid_Feed_Settings {
     const GENERAL_OPTION_GROUP = 'masjidfeed_general_group';
     const PUSH_OPTION_GROUP = 'masjidfeed_push_group';
     const PAGE_SLUG = 'masjidfeed-app-settings';
+    const VIEW_NONCE_ACTION = 'masjidfeed_settings_view';
 
     public function __construct() {
         add_action('admin_menu', array($this, 'add_settings_page'));
@@ -159,6 +160,10 @@ JS;
         $input = is_array($input) ? $input : array();
         $existing = get_option(MASJIDFEED_OPTION_KEY, array());
         $existing = is_array($existing) ? $existing : array();
+        $nonce = isset($_POST['_wpnonce']) ? sanitize_text_field(wp_unslash($_POST['_wpnonce'])) : '';
+        if (!wp_verify_nonce($nonce, self::GENERAL_OPTION_GROUP . '-options') && !wp_verify_nonce($nonce, self::PUSH_OPTION_GROUP . '-options')) {
+            return $existing;
+        }
         $tab = isset($input['_tab']) ? sanitize_key(wp_unslash($input['_tab'])) : '';
 
         if ('push' === $tab) {
@@ -228,8 +233,10 @@ JS;
             return;
         }
 
+        $nonce = isset($_GET['_wpnonce']) ? sanitize_text_field(wp_unslash($_GET['_wpnonce'])) : '';
         $current_tab = isset($_GET['tab']) ? sanitize_key(wp_unslash($_GET['tab'])) : 'general';
-        if (!in_array($current_tab, array('general', 'push', 'debug'), true)) {
+        if (!in_array($current_tab, array('general', 'push', 'debug'), true)
+            || !wp_verify_nonce($nonce, self::VIEW_NONCE_ACTION)) {
             $current_tab = 'general';
         }
 
@@ -248,7 +255,10 @@ JS;
                     'debug' => __('Debug', 'masjidfeed-app'),
                 );
                 foreach ($tabs as $tab => $label) :
-                    $url = add_query_arg('tab', $tab, admin_url('options-general.php?page=' . self::PAGE_SLUG));
+                    $url = wp_nonce_url(
+                        add_query_arg('tab', $tab, admin_url('options-general.php?page=' . self::PAGE_SLUG)),
+                        self::VIEW_NONCE_ACTION
+                    );
                     ?>
                     <a href="<?php echo esc_url($url); ?>" class="nav-tab<?php echo $tab === $current_tab ? ' nav-tab-active' : ''; ?>"><?php echo esc_html($label); ?></a>
                 <?php endforeach; ?>
@@ -610,7 +620,10 @@ JS;
     }
 
     public function handle_validate_firebase() {
-        $this->authorize_push_action('masjidfeed_validate_firebase');
+        check_admin_referer('masjidfeed_validate_firebase');
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjidfeed-app'));
+        }
         try {
             (new Masjid_Feed_Firebase())->validate();
             $this->redirect_with_notice('firebase_valid', 'success');
@@ -620,7 +633,10 @@ JS;
     }
 
     public function handle_test_push() {
-        $this->authorize_push_action('masjidfeed_test_push');
+        check_admin_referer('masjidfeed_test_push');
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjidfeed-app'));
+        }
         $token = sanitize_text_field(wp_unslash($_POST['fcm_token'] ?? ''));
         if ('' === $token) {
             $this->redirect_with_notice('token_required', 'error');
@@ -644,14 +660,20 @@ JS;
     }
 
     public function handle_toggle_api_tracing() {
-        $this->authorize_push_action('masjidfeed_toggle_api_tracing');
+        check_admin_referer('masjidfeed_toggle_api_tracing');
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjidfeed-app'));
+        }
         $enabled = !empty($_POST['enabled']);
         Masjid_Feed_API_Trace::set_enabled($enabled);
         $this->redirect_with_notice($enabled ? 'api_tracing_enabled' : 'api_tracing_disabled', 'success');
     }
 
     public function handle_clear_api_traces() {
-        $this->authorize_push_action('masjidfeed_clear_api_traces');
+        check_admin_referer('masjidfeed_clear_api_traces');
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjidfeed-app'));
+        }
         Masjid_Feed_API_Trace::clear();
         $this->redirect_with_notice('api_traces_cleared', 'success');
     }
@@ -752,13 +774,21 @@ JS;
     }
 
     private function read_upload($field) {
-        if (empty($_FILES[$field]) || UPLOAD_ERR_NO_FILE === (int) $_FILES[$field]['error']) {
+        $nonce = isset($_POST['_wpnonce']) ? sanitize_text_field(wp_unslash($_POST['_wpnonce'])) : '';
+        if (!wp_verify_nonce($nonce, self::GENERAL_OPTION_GROUP . '-options') && !wp_verify_nonce($nonce, self::PUSH_OPTION_GROUP . '-options')) {
+            return new WP_Error('upload_' . $field, __('Firebase configuration uploads require a valid settings form.', 'masjidfeed-app'));
+        }
+        if (!isset($_FILES[$field], $_FILES[$field]['error'], $_FILES[$field]['size'], $_FILES[$field]['tmp_name']) || !is_array($_FILES[$field])) {
+            return null;
+        }
+        if (UPLOAD_ERR_NO_FILE === (int) $_FILES[$field]['error']) {
             return null;
         }
         if (UPLOAD_ERR_OK !== (int) $_FILES[$field]['error'] || (int) $_FILES[$field]['size'] > 1024 * 1024) {
             return new WP_Error('upload_' . $field, __('A Firebase configuration upload failed or exceeded 1 MB.', 'masjidfeed-app'));
         }
-        $contents = file_get_contents($_FILES[$field]['tmp_name']);
+        $tmp_name = isset($_FILES[$field]['tmp_name']) ? sanitize_text_field(wp_unslash($_FILES[$field]['tmp_name'])) : '';
+        $contents = '' !== $tmp_name && is_readable($tmp_name) ? file_get_contents($tmp_name) : false;
         return is_string($contents) ? $contents : new WP_Error('upload_' . $field, __('A Firebase configuration upload could not be read.', 'masjidfeed-app'));
     }
 
@@ -793,12 +823,13 @@ JS;
     }
 
     private function render_notices() {
+        $nonce = isset($_GET['_wpnonce']) ? sanitize_text_field(wp_unslash($_GET['_wpnonce'])) : '';
         if (!empty($_GET['settings-updated'])) {
             echo '<div class="notice notice-success"><p>' . esc_html__('Settings saved.', 'masjidfeed-app') . '</p></div>';
         }
         $notice = sanitize_text_field(wp_unslash($_GET['masjidfeed_notice'] ?? ''));
-        $notice_type = sanitize_key($_GET['masjidfeed_notice_type'] ?? 'success');
-        if ($notice) {
+        $notice_type = sanitize_key(wp_unslash($_GET['masjidfeed_notice_type'] ?? 'success'));
+        if ($notice && wp_verify_nonce($nonce, self::VIEW_NONCE_ACTION)) {
             $messages = array(
                 'firebase_valid' => __('Firebase configuration is valid.', 'masjidfeed-app'),
                 'test_sent' => __('Test notification sent.', 'masjidfeed-app'),
@@ -833,7 +864,9 @@ JS;
         <h3><?php esc_html_e('Recent deliveries', 'masjidfeed-app'); ?></h3>
         <?php
         $table = $wpdb->prefix . 'masjidfeed_push_jobs';
-        $jobs = $wpdb->get_results("SELECT * FROM $table ORDER BY created_at DESC LIMIT 50");
+        $sql = sprintf('SELECT * FROM %s ORDER BY created_at DESC LIMIT 50', esc_sql($table));
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- admin-only recent-deliveries view of the custom queue table; the table name is built from a fixed identifier and there are no parameters to prepare.
+        $jobs = $wpdb->get_results($sql);
         if (!$jobs) {
             echo '<p>' . esc_html__('No notifications have been queued.', 'masjidfeed-app') . '</p>';
             return;
@@ -906,14 +939,11 @@ JS;
         <?php endif;
     }
 
-    private function authorize_push_action($nonce_action) {
-        if (!current_user_can('manage_options') || !check_admin_referer($nonce_action)) {
-            wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjidfeed-app'));
-        }
-    }
-
     private function redirect_with_notice($notice, $type) {
-        wp_safe_redirect(add_query_arg(array('page' => self::PAGE_SLUG, 'masjidfeed_notice' => $notice, 'masjidfeed_notice_type' => $type), admin_url('options-general.php')));
+        wp_safe_redirect(wp_nonce_url(
+            add_query_arg(array('page' => self::PAGE_SLUG, 'masjidfeed_notice' => $notice, 'masjidfeed_notice_type' => $type), admin_url('options-general.php')),
+            self::VIEW_NONCE_ACTION
+        ));
         exit;
     }
 }

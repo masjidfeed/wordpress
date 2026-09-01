@@ -18,4 +18,5 @@ wp_clear_scheduled_hook('masjidfeed_process_push_job');
 wp_clear_scheduled_hook('masjidfeed_cleanup_push_jobs');
 
 global $wpdb;
+// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange -- uninstallation must remove the custom queue table.
 $wpdb->query("DROP TABLE IF EXISTS {$wpdb->prefix}masjidfeed_push_jobs");

@@ -242,6 +242,7 @@ class Masjid_Feed_REST_API {
             'has_password' => false,
             'posts_per_page' => -1,
             'no_found_rows' => true,
+            // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- required to find event posts; results are cached at the REST layer.
             'meta_query' => array(
                 array(
                     'key' => '_icob_event_date_enabled',
@@ -253,6 +254,7 @@ class Masjid_Feed_REST_API {
 
         $tax_query = $this->build_tax_query($opts['events_categories'], $opts['events_tags']);
         if ($tax_query) {
+            // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query -- required to apply the configured event filters; results are cached at the REST layer.
             $args['tax_query'] = $tax_query;
         }
 
@@ -326,6 +328,7 @@ class Masjid_Feed_REST_API {
             ? $this->build_tax_query(array($opts['friday_announcements_category']), array())
             : $this->build_tax_query($opts['announcements_categories'], $opts['announcements_tags']);
         if ($tax_query) {
+            // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query -- required to apply the configured announcement filters; results are cached at the REST layer.
             $args['tax_query'] = $tax_query;
         }
 
@@ -677,7 +680,7 @@ class Masjid_Feed_REST_API {
         $post = array(
             'postId' => $post_id,
             'title' => get_the_title($post_id),
-            'description' => apply_filters('the_content', get_post_field('post_content', $post_id)),
+            'description' => apply_filters('the_content', get_post_field('post_content', $post_id)), // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- applying a core WordPress filter.
             'postUrl' => $this->get_post_url($post_id),
             'publishedAt' => get_post_time('c', true, $post_id),
             'image' => get_the_post_thumbnail_url($post_id, 'large') ?: null,

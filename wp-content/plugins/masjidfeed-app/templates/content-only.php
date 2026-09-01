@@ -9,7 +9,7 @@ the_post();
 
 ob_start();
 the_content();
-$content = ob_get_clean();
+$masjidfeed_content = ob_get_clean();
 ?><!DOCTYPE html>
 <html <?php language_attributes(); ?>>
 <head>
@@ -25,7 +25,7 @@ $content = ob_get_clean();
             <div class="post-thumbnail"><?php the_post_thumbnail(); ?></div>
         <?php endif; ?>
         <div class="entry-content">
-            <?php echo $content; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+            <?php echo $masjidfeed_content; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
         </div>
     </article>
 </main>

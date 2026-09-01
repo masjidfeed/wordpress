@@ -8,7 +8,9 @@
         "firebase/php-jwt": "^7.0"
     },
     "require-dev": {
-        "humbug/php-scoper": "^0.18.19"
+        "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
+        "humbug/php-scoper": "^0.18.19",
+        "wp-coding-standards/wpcs": "^3.2"
     },
     "scripts": {
         "build-release": "php scripts/build-release.php"
@@ -20,7 +22,10 @@
             "php": "8.2.0"
         },
         "allow-plugins": {
-            "humbug/php-scoper": true
+            "humbug/php-scoper": true,
+            "dealerdirect/phpcodesniffer-composer-installer": true
         }
+    },
+    "repositories": {
     }
 }
