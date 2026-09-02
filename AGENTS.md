@@ -25,7 +25,7 @@ Everything the plugin declares in the global PHP scope must carry the plugin pre
 - Action/nonce/ AJAX hooks: `add_action( 'masjidfeed_process_push_job', ... )`, `add_action( 'admin_post_masjidfeed_resend_push', ... )`, nonce actions `masjidfeed_*`
 - Transients / cache keys: `masjidfeed_events_response_v8`, etc.
 - Custom database tables: `$wpdb->prefix . 'masjidfeed_push_jobs'`
-- REST API namespace: `masjidfeed/v1`
+- REST API namespace: `masjid/v1`
 - Scoped vendor namespace: `Masjid_Feed\Dependencies` (configured in `scoper.inc.php`)
 - Text domain: `masjidfeed-app` (must match the plugin slug)
 

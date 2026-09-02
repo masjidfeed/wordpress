@@ -116,7 +116,7 @@ class Masjid_Feed_API_Trace {
     }
 
     private function is_masjid_feed_request($request) {
-        return 0 === strpos($request->get_route(), '/masjidfeed/v1/');
+        return 0 === strpos($request->get_route(), '/masjid/v1/');
     }
 
     private static function redact($value, $depth = 0) {

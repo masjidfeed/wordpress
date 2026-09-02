@@ -2,7 +2,7 @@
 /**
  * REST API endpoints for the Masjid App mobile client.
  *
- * Namespace: masjidfeed/v1
+ * Namespace: masjid/v1
  *  - GET /config         App configuration (branding, contact, feature flags)
  *  - GET /salahapi       SalahAPI prayer time document (proxied from Muslim Prayer Times)
  *  - GET /events         Upcoming events
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) { exit; }
 
 class Masjid_Feed_REST_API {
 
-    const NAMESPACE_ = 'masjidfeed/v1';
+    const NAMESPACE_ = 'masjid/v1';
     const LIST_LIMIT = 20;
     const CLIENT_CACHE_TTL = 60;
     const SERVER_CACHE_TTL = DAY_IN_SECONDS;

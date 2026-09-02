@@ -866,9 +866,6 @@ JS;
 
     private function render_notices() {
         $nonce = isset($_GET['_wpnonce']) ? sanitize_text_field(wp_unslash($_GET['_wpnonce'])) : '';
-        if (!empty($_GET['settings-updated'])) {
-            echo '<div class="notice notice-success"><p>' . esc_html__('Settings saved.', 'masjidfeed-app') . '</p></div>';
-        }
         $notice = sanitize_text_field(wp_unslash($_GET['masjidfeed_notice'] ?? ''));
         $notice_type = sanitize_key(wp_unslash($_GET['masjidfeed_notice_type'] ?? 'success'));
         if ($notice && wp_verify_nonce($nonce, self::VIEW_NONCE_ACTION)) {

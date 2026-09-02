@@ -19,14 +19,14 @@ post categories/tags feed the app's Events and Announcements screens. An
 optional category can replace the regular announcement filters on Fridays in
 the WordPress site timezone. These settings are available from the
 **Settings → MasjidFeed App** page, while the app fetches everything over a REST API
-under the `masjidfeed/v1` namespace:
+under the `masjid/v1` namespace:
 
-* `/wp-json/masjidfeed/v1/config` — app configuration (branding, contact, feature flags)
-* `/wp-json/masjidfeed/v1/salahapi` — SalahAPI prayer time configuration (proxied from Muslim Prayer Times)
-* `/wp-json/masjidfeed/v1/events` — up to 20 upcoming post objects with event fields
-* `/wp-json/masjidfeed/v1/announcements` — up to 20 announcement post objects
-* `/wp-json/masjidfeed/v1/posts/{id}` — one published post with optional event fields
-* `/wp-json/masjidfeed/v1/push/registrations` — App Check-protected FCM topic registration
+* `/wp-json/masjid/v1/config` — app configuration (branding, contact, feature flags)
+* `/wp-json/masjid/v1/salahapi` — SalahAPI prayer time configuration (proxied from Muslim Prayer Times)
+* `/wp-json/masjid/v1/events` — up to 20 upcoming post objects with event fields
+* `/wp-json/masjid/v1/announcements` — up to 20 announcement post objects
+* `/wp-json/masjid/v1/posts/{id}` — one published post with optional event fields
+* `/wp-json/masjid/v1/push/registrations` — App Check-protected FCM topic registration
 
 Configuration, list, and post responses include ETag and Cache-Control
 headers and cache their rendered payloads using the WordPress Transients API.
