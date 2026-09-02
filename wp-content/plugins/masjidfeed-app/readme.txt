@@ -39,9 +39,11 @@ template containing the featured image and content. The `/config`
 response automatically adds this parameter to non-empty donation and Ramadan
 URLs.
 
-It requires the "Awesome Events" and "Muslim Prayer Times" plugins to be
-installed and active, since it builds on their event and prayer-time data
-rather than duplicating it.
+It requires the "Muslim Prayer Times" plugin to be installed and active,
+since it builds on its prayer-time data rather than duplicating it. Events
+are provided by an events plugin selected in settings: "Awesome Calendar
+Events" or "The Events Calendar". When no events plugin is selected, the
+Events feature is disabled.
 
 == Push Notifications ==
 

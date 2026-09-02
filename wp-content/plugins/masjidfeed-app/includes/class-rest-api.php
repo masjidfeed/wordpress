@@ -5,7 +5,7 @@
  * Namespace: masjidfeed/v1
  *  - GET /config         App configuration (branding, contact, feature flags)
  *  - GET /salahapi       SalahAPI prayer time document (proxied from Muslim Prayer Times)
- *  - GET /events         Upcoming events (sourced from Awesome Events)
+ *  - GET /events         Upcoming events
  *  - GET /announcements  Announcements (regular WordPress posts)
  *  - GET /posts/{id}     A published post with optional event fields
  */
@@ -18,9 +18,9 @@ class Masjid_Feed_REST_API {
     const LIST_LIMIT = 20;
     const CLIENT_CACHE_TTL = 60;
     const SERVER_CACHE_TTL = DAY_IN_SECONDS;
-    const CONFIG_CACHE_KEY = 'masjidfeed_config_response_v5';
+    const CONFIG_CACHE_KEY = 'masjidfeed_config_response_v6';
     const CONFIG_SHARED_CACHE_TTL = HOUR_IN_SECONDS;
-    const EVENTS_CACHE_KEY = 'masjidfeed_events_response_v8';
+    const EVENTS_CACHE_KEY = 'masjidfeed_events_response_v9';
     const EVENTS_SHARED_CACHE_TTL = 5 * MINUTE_IN_SECONDS;
     const ANNOUNCEMENTS_CACHE_KEY = 'masjidfeed_announcements_response_v3';
     const FRIDAY_ANNOUNCEMENTS_CACHE_KEY = 'masjidfeed_announcements_response_v8_friday';
@@ -180,7 +180,7 @@ class Masjid_Feed_REST_API {
                 'whatsapp' => $opts['whatsapp'],
             ),
             'featureFlags' => array(
-                'events' => (bool) $opts['feature_events'],
+                'events' => (bool) $opts['feature_events'] && null !== Masjid_Feed_Event_Sources::get_source($opts['events_source']),
                 'announcements' => (bool) $opts['feature_announcements'],
                 'donations' => (bool) $opts['feature_donations'],
                 'qibla' => (bool) $opts['feature_qibla'],
@@ -221,10 +221,12 @@ class Masjid_Feed_REST_API {
      * GET /events
      */
     public function get_events($request) {
-        if (!class_exists('Awesome_Events_Event_Meta')) {
+        $opts = Masjid_Feed_Settings::get_all_options();
+        $source = Masjid_Feed_Event_Sources::get_source($opts['events_source']);
+        if (!$source) {
             return new WP_Error(
                 'masjidfeed_missing_dependency',
-                __('The Awesome Events plugin is required to provide event data.', 'masjidfeed-app'),
+                __('A supported events plugin must be selected in MasjidFeed App settings and be active to provide event data.', 'masjidfeed-app'),
                 array('status' => 503)
             );
         }
@@ -234,55 +236,10 @@ class Masjid_Feed_REST_API {
             return $cached_response;
         }
 
-        $opts = Masjid_Feed_Settings::get_all_options();
-
-        $args = array(
-            'post_type' => 'post',
-            'post_status' => 'publish',
-            'has_password' => false,
-            'posts_per_page' => -1,
-            'no_found_rows' => true,
-            // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- required to find event posts; results are cached at the REST layer.
-            'meta_query' => array(
-                array(
-                    'key' => '_icob_event_date_enabled',
-                    'value' => '1',
-                    'compare' => '=',
-                ),
-            ),
-        );
-
-        $tax_query = $this->build_tax_query($opts['events_categories'], $opts['events_tags']);
-        if ($tax_query) {
-            // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query -- required to apply the configured event filters; results are cached at the REST layer.
-            $args['tax_query'] = $tax_query;
-        }
-
-        $query = new WP_Query($args);
-        $events = array();
-
-        $ics_generator = class_exists('Awesome_Events_ICS_Generator') ? new Awesome_Events_ICS_Generator() : null;
-
-        if ($query->have_posts()) {
-            while ($query->have_posts()) {
-                $query->the_post();
-                $post_id = get_the_ID();
-
-                $recurrence_type = get_post_meta($post_id, '_icob_event_recurrence_type', true) ?: 'none';
-                $event_datetime = $this->get_event_datetime_iso($post_id);
-
-                // Skip non-recurring events whose date has already passed.
-                if ($recurrence_type === 'none' && !$event_datetime) {
-                    continue;
-                }
-
-                $events[] = $this->build_post($post_id, $event_datetime, $ics_generator);
-            }
-            wp_reset_postdata();
-        }
+        $events = $source->get_upcoming_events($opts);
 
         usort($events, function($first, $second) {
-            return strcmp($first['eventDateTime'], $second['eventDateTime']);
+            return strcmp((string) $first['eventDateTime'], (string) $second['eventDateTime']);
         });
         $events = array_slice($events, 0, self::LIST_LIMIT);
 
@@ -340,7 +297,7 @@ class Masjid_Feed_REST_API {
                 $query->the_post();
                 $post_id = get_the_ID();
 
-                $announcements[] = $this->build_post($post_id);
+                $announcements[] = $this->build_base_post($post_id);
             }
             wp_reset_postdata();
         }
@@ -362,7 +319,7 @@ class Masjid_Feed_REST_API {
         $post_id = absint($request['id']);
         $post = get_post($post_id);
 
-        if (!$post || 'post' !== $post->post_type || 'publish' !== $post->post_status || '' !== $post->post_password) {
+        if (!$post || 'publish' !== $post->post_status || '' !== $post->post_password) {
             return new WP_Error(
                 'masjidfeed_post_not_found',
                 __('Post not found.', 'masjidfeed-app'),
@@ -380,7 +337,19 @@ class Masjid_Feed_REST_API {
             return $cached_response;
         }
 
-        $data = $this->build_post($post_id);
+        $opts = Masjid_Feed_Settings::get_all_options();
+        $source = Masjid_Feed_Event_Sources::get_source($opts['events_source']);
+        $data = $source ? $source->build_post($post_id) : null;
+        if (!is_array($data)) {
+            if ('post' !== $post->post_type) {
+                return new WP_Error(
+                    'masjidfeed_post_not_found',
+                    __('Post not found.', 'masjidfeed-app'),
+                    array('status' => 404)
+                );
+            }
+            $data = $this->build_base_post($post_id);
+        }
 
         return $this->cache_response($request, $cache_key, $data, self::POST_SHARED_CACHE_TTL);
     }
@@ -674,110 +643,40 @@ class Masjid_Feed_REST_API {
     }
 
     /**
-     * Build the common post representation, including event fields when applicable.
+     * Build the common post representation. Event fields, when applicable,
+     * are added by the configured event source.
      */
-    private function build_post($post_id, $event_datetime = null, $ics_generator = null) {
-        $post = array(
+    public static function build_base_post($post_id) {
+        return array(
             'postId' => $post_id,
             'title' => get_the_title($post_id),
             'description' => apply_filters('the_content', get_post_field('post_content', $post_id)), // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- applying a core WordPress filter.
-            'postUrl' => $this->get_post_url($post_id),
+            'postUrl' => self::get_post_url($post_id),
             'publishedAt' => get_post_time('c', true, $post_id),
             'image' => get_the_post_thumbnail_url($post_id, 'large') ?: null,
-            'category' => $this->get_primary_category_slug($post_id),
+            'category' => self::get_primary_category_slug($post_id),
             'url' => get_permalink($post_id),
         );
-
-        if ('1' !== get_post_meta($post_id, '_icob_event_date_enabled', true)) {
-            return $post;
-        }
-
-        $post['isEvent'] = true;
-
-        if (null === $event_datetime && class_exists('Awesome_Events_Event_Meta')) {
-            $event_datetime = $this->get_event_datetime_iso($post_id);
-        }
-        if (null === $ics_generator && class_exists('Awesome_Events_ICS_Generator')) {
-            $ics_generator = new Awesome_Events_ICS_Generator();
-        }
-
-        $post['location'] = get_post_meta($post_id, '_icob_event_location', true) ?: '';
-        $post['eventDateTime'] = $event_datetime;
-        $post['recurrenceRule'] = $ics_generator ? $ics_generator->get_recurrence_rule($post_id) : null;
-
-        $alert = get_post_meta($post_id, '_icob_announcement', true);
-        if ('' !== $alert) {
-            $post['alert'] = $alert;
-        }
-
-        $alert_end_datetime = $this->get_alert_end_datetime_iso($post_id);
-        if ($alert_end_datetime) {
-            $post['alertEndDateTime'] = $alert_end_datetime;
-        }
-
-        return $post;
     }
 
     /**
      * Get the cache key for a post.
      */
     private function get_post_cache_key($post_id) {
-        return 'masjidfeed_post_response_v4_' . absint($post_id);
+        return 'masjidfeed_post_response_v5_' . absint($post_id);
     }
 
     /**
      * Get the REST URL for a post.
      */
-    private function get_post_url($post_id) {
+    private static function get_post_url($post_id) {
         return rest_url(self::NAMESPACE_ . '/posts/' . absint($post_id));
-    }
-
-    /**
-     * Get the ISO-8601 date/time for the next occurrence of an event
-     * (or its single event date), combining the event date meta with the
-     * optional start time meta, in the site's configured timezone.
-     */
-    private function get_event_datetime_iso($post_id) {
-        // get_next_occurrence() already returns null for non-recurring events
-        // whose date is in the past, and for recurring events with no more
-        // upcoming occurrences.
-        $date = Awesome_Events_Event_Meta::get_next_occurrence($post_id);
-        if (!$date) {
-            return null;
-        }
-
-        $start_time = get_post_meta($post_id, '_icob_event_start_time', true);
-        $time_part = preg_match('/^([01]?\d|2[0-3]):[0-5]\d$/', (string) $start_time) ? $start_time : '00:00';
-
-        try {
-            $dt = new DateTime($date . ' ' . $time_part, wp_timezone());
-            return $dt->format('c');
-        } catch (Exception $e) {
-            return null;
-        }
-    }
-
-    /**
-     * Get an announcement expiration as ISO-8601 in the site's timezone.
-     */
-    private function get_alert_end_datetime_iso($post_id) {
-        $expiration = get_post_meta($post_id, '_icob_announcement_expiration', true);
-        if (!$expiration) {
-            return null;
-        }
-
-        try {
-            $dt = new DateTime($expiration, wp_timezone());
-            return $dt->format('c');
-        } catch (Exception $e) {
-            return null;
-        }
     }
 
     /**
      * Get the slug of the first non-"uncategorized" category assigned to a post.
      */
-    private function get_primary_category_slug($post_id) {
+    private static function get_primary_category_slug($post_id) {
         $categories = get_the_category($post_id);
         if (empty($categories)) {
             return '';

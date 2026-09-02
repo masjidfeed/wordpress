@@ -93,6 +93,9 @@ class Masjid_Feed_Plugin {
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-api-trace.php';
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-settings.php';
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-content-only-renderer.php';
+        require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-event-sources.php';
+        require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-event-source-awesome-calendar-events.php';
+        require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-event-source-the-events-calendar.php';
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-rest-api.php';
 
         new Masjid_Feed_API_Trace();
@@ -126,9 +129,6 @@ class Masjid_Feed_Plugin {
         }
 
         $missing = array();
-        if (!class_exists('Awesome_Events_Event_Meta')) {
-            $missing[] = 'Awesome Events';
-        }
         if (!function_exists('muslprti_salah_api_endpoint')) {
             $missing[] = 'Muslim Prayer Times';
         }

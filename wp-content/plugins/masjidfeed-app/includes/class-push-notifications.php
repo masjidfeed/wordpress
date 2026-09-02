@@ -202,12 +202,21 @@ class Masjid_Feed_Push_Notifications {
         return $tag_id && has_term($tag_id, 'post_tag', $post_id);
     }
 
+    private function is_event_post($post) {
+        if ($post instanceof WP_Post && 'tribe_events' === $post->post_type) {
+            return true;
+        }
+        $post_id = $post instanceof WP_Post ? $post->ID : 0;
+        return '1' === (string) get_post_meta($post_id, '_awecal_event_date_enabled', true)
+            || '1' === (string) get_post_meta($post_id, '_icob_event_date_enabled', true);
+    }
+
     private function build_payload($post_id, $notification_id) {
         $post = get_post($post_id);
         if (!$post) {
             return new WP_Error('masjidfeed_post_missing', __('The notification post no longer exists.', 'masjidfeed-app'));
         }
-        $type = '1' === get_post_meta($post_id, '_icob_event_date_enabled', true) ? 'events' : 'announcements';
+        $type = $this->is_event_post($post) ? 'events' : 'announcements';
         $masjid_id = (string) Masjid_Feed_Settings::get_option('masjid_id');
         $template = (string) Masjid_Feed_Settings::get_option('push_deep_link_template');
         if ('' === $template) {

@@ -2,7 +2,7 @@ wp-content/fonts/*
 wp-content/plugins/advanced-query-loop*
 wp-content/plugins/akismet*
 wp-content/plugins/auto-sizes*
-wp-content/plugins/awesome-events*
+wp-content/plugins/awesome-calendar-events*
 wp-content/plugins/create-block-theme*
 wp-content/plugins/dominant-color-*
 wp-content/plugins/embed-optimizer*
@@ -23,6 +23,7 @@ wp-content/plugins/webp-uploads*
 wp-content/plugins/wp-cfm*
 wp-content/plugins/wp-mail*
 wp-content/plugins/wpforms-lite*
+wp-content/plugins/the-events-calendar*
 wp-content/themes/twenty*
 wp-content/themes/frost/*
 wp-content/uploads*

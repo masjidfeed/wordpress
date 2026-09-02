@@ -74,6 +74,7 @@ class Masjid_Feed_Settings {
             'feature_qibla' => 1,
             'feature_prayer_reminders' => 1,
             'content_only_rendering_enabled' => 0,
+            'events_source' => 'awesome_calendar_events',
             'events_categories' => array(),
             'events_tags' => array(),
             'announcements_categories' => array(),
@@ -195,10 +196,16 @@ JS;
         $out['instagram'] = sanitize_url($input['instagram'] ?? '');
         $out['whatsapp'] = sanitize_url($input['whatsapp'] ?? '');
 
+        $out['events_source'] = $this->sanitize_events_source($input);
+
         foreach (array('feature_events', 'feature_announcements', 'feature_donations', 'feature_qibla', 'feature_prayer_reminders') as $flag) {
             $out[$flag] = !empty($input[$flag]) ? 1 : 0;
         }
         $out['content_only_rendering_enabled'] = !empty($input['content_only_rendering_enabled']) ? 1 : 0;
+
+        if ('' === $out['events_source']) {
+            $out['feature_events'] = 0;
+        }
 
         foreach (array('events_categories', 'events_tags', 'announcements_categories', 'announcements_tags') as $tax_field) {
             $out[$tax_field] = isset($input[$tax_field]) && is_array($input[$tax_field])
@@ -209,6 +216,23 @@ JS;
         $out['friday_announcements_category'] = absint($input['friday_announcements_category'] ?? 0);
 
         return $out;
+    }
+
+    private function sanitize_events_source($input) {
+        $key = sanitize_key(wp_unslash($input['events_source'] ?? ''));
+        if ('' === $key) {
+            return '';
+        }
+        $choices = Masjid_Feed_Event_Sources::get_choices();
+        if (!isset($choices[$key])) {
+            add_settings_error(MASJIDFEED_OPTION_KEY, 'invalid_events_source', __('The selected events plugin is not supported.', 'masjidfeed-app'));
+            return '';
+        }
+        if (!$choices[$key]['available']) {
+            add_settings_error(MASJIDFEED_OPTION_KEY, 'unavailable_events_source', __('The selected events plugin is not active on this site.', 'masjidfeed-app'));
+            return '';
+        }
+        return $key;
     }
 
     private function sanitize_push_settings($input, $existing) {
@@ -419,6 +443,24 @@ JS;
                             <input type="checkbox" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[content_only_rendering_enabled]" value="1" <?php checked(!empty($opts['content_only_rendering_enabled'])); ?> />
                             <?php esc_html_e('Enable content-only rendering', 'masjidfeed-app'); ?>
                         </label>
+                    </td>
+                </tr>
+            </table>
+
+            <h2><?php esc_html_e('Events', 'masjidfeed-app'); ?></h2>
+            <p class="description"><?php esc_html_e('Select the plugin that provides events to the mobile app. If no plugin is selected, the Events feature is disabled.', 'masjidfeed-app'); ?></p>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><label for="masjidfeed_events_source"><?php esc_html_e('Events Plugin', 'masjidfeed-app'); ?></label></th>
+                    <td>
+                        <select id="masjidfeed_events_source" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[events_source]">
+                            <option value=""><?php echo esc_html('— ' . __('None', 'masjidfeed-app') . ' —'); ?></option>
+                            <?php foreach (Masjid_Feed_Event_Sources::get_choices() as $key => $choice) : ?>
+                                <option value="<?php echo esc_attr($key); ?>" <?php selected($opts['events_source'], $key); ?> <?php disabled(!$choice['available']); ?>>
+                                    <?php echo esc_html($choice['label'] . (!$choice['available'] ? __(' (not installed)', 'masjidfeed-app') : '')); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
                     </td>
                 </tr>
             </table>

@@ -501,8 +501,10 @@ Example response:
 ]
 ```
 
-If the Awesome Events plugin is unavailable, this endpoint returns `503` with
-error code `masjidapp_missing_dependency`.
+If no events plugin is selected in MasjidFeed App settings, or the selected
+plugin is inactive, this endpoint returns `503` with error code
+`masjidapp_missing_dependency`. Supported event plugins are Awesome Calendar
+Events and The Events Calendar.
 
 ## Announcements
 
