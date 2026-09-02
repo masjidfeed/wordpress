@@ -31,9 +31,10 @@ interface Masjid_Feed_Event_Source {
      * Build the upcoming-event feed for the mobile client.
      *
      * @param array $opts MasjidFeed settings.
+     * @param int|null $limit Maximum number of events to return; null uses the source default.
      * @return array List of Masjid App post objects, each with isEvent set.
      */
-    public function get_upcoming_events($opts);
+    public function get_upcoming_events($opts, $limit = null);
 
     /**
      * Build the Masjid App post object for one post, or null when this
@@ -83,6 +84,22 @@ class Masjid_Feed_Event_Sources {
             );
         }
         return $choices;
+    }
+
+    /**
+     * Taxonomies backing the Events Filter categories and tags for a source.
+     */
+    public static function get_filter_taxonomies($key) {
+        if ('the_events_calendar' === $key) {
+            return array(
+                'categories' => Masjid_Feed_Event_Source_The_Events_Calendar::EVENTS_TAXONOMY,
+                'tags' => 'post_tag',
+            );
+        }
+        return array(
+            'categories' => 'category',
+            'tags' => 'post_tag',
+        );
     }
 
     /**

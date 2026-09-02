@@ -103,7 +103,6 @@ for ($i = 1; $i <= 100; $i++) {
         'EventStartDate' => $start_date,
         'EventEndDate' => $end_date,
         'EventAllDay' => $is_all_day,
-        'EventHideFromUpcoming' => false,
         'EventShowMapLink' => true,
         'EventShowMap' => true,
         'EventCost' => ($i % 3 === 0) ? '10.00' : '',
@@ -123,6 +122,40 @@ for ($i = 1; $i <= 100; $i++) {
     if (!$post_id) {
         echo "ERROR creating event $i\n";
         continue;
+    }
+
+    // Some TEC versions drop EventStartDate when created via tribe_create_event
+    // in CLI context; write the date meta directly and rebuild TEC's custom
+    // tables (wp_tec_events / wp_tec_occurrences) via its repository so the
+    // event is queryable and listed.
+    update_post_meta($post_id, '_EventStartDate', $start_date);
+    update_post_meta($post_id, '_EventEndDate', $end_date);
+    update_post_meta($post_id, '_EventAllDay', $is_all_day ? 'yes' : 'no');
+    update_post_meta($post_id, '_EventTimezone', wp_timezone_string());
+    $start_utc = new DateTime($start_date, wp_timezone());
+    $start_utc->setTimezone(new DateTimeZone('UTC'));
+    update_post_meta($post_id, '_EventStartDateUTC', $start_utc->format('Y-m-d H:i:s'));
+    $end_utc = new DateTime($end_date, wp_timezone());
+    $end_utc->setTimezone(new DateTimeZone('UTC'));
+    update_post_meta($post_id, '_EventEndDateUTC', $end_utc->format('Y-m-d H:i:s'));
+
+    // An empty _EventHideFromUpcoming meta row hides the event from upcoming
+    // queries; make sure it is not present.
+    delete_post_meta($post_id, '_EventHideFromUpcoming');
+
+    // tribe_create_event drops tax_input when no user is logged in; assign
+    // the event category and tags explicitly.
+    wp_set_object_terms($post_id, array_values(array_filter([
+        $cat_ids['events'] ?? 0,
+        $cat_ids[$categories[$i % count($categories)]] ?? 0,
+    ])), Tribe__Events__Main::TAXONOMY, false);
+    wp_set_object_terms($post_id, array_values(array_unique(array_filter([
+        $tag_ids[$tag_pool[$i % count($tag_pool)]] ?? 0,
+        $tag_ids[$tag_pool[($i + 2) % count($tag_pool)]] ?? 0,
+    ]))), 'post_tag', false);
+
+    if (class_exists('TEC\\Events\\Custom_Tables\\V1\\Repository\\Events')) {
+        (new TEC\Events\Custom_Tables\V1\Repository\Events())->update($post_id, []);
     }
 
     if ($is_all_day) {

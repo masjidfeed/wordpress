@@ -117,7 +117,31 @@ class Masjid_Feed_Settings {
         wp_enqueue_style('wp-color-picker');
         wp_enqueue_script('wp-color-picker');
         wp_add_inline_script('media-editor', $this->media_picker_js());
+        wp_add_inline_script('media-editor', $this->events_source_js());
         wp_add_inline_script('wp-color-picker', $this->color_picker_js());
+    }
+
+    private function events_source_js() {
+        $flag_id = 'masjidfeed_flag_feature_events';
+        return <<<JS
+jQuery(function($) {
+    var source = $('#masjidfeed_events_source');
+    var flag = $('#{$flag_id}');
+    function sync() {
+        var value = source.val();
+        var none = '' === value;
+        var isTec = 'the_events_calendar' === value;
+        flag.prop('disabled', none);
+        if (none) {
+            flag.prop('checked', false);
+        }
+        $('[data-for-default]').toggle(!isTec).find('input[type=checkbox]').prop('disabled', isTec);
+        $('[data-for-tec]').toggle(isTec).find('input[type=checkbox]').prop('disabled', !isTec);
+    }
+    source.on('change', sync);
+    sync();
+});
+JS;
     }
 
     private function color_picker_js() {
@@ -303,6 +327,9 @@ JS;
     }
 
     private function render_general_tab($opts, $categories, $tags) {
+        $choices = Masjid_Feed_Event_Sources::get_choices();
+        $events_source = self::resolve_events_source($opts);
+        $is_tec_selected = Masjid_Feed_Event_Source_The_Events_Calendar::KEY === $events_source;
         ?>
         <form method="post" action="options.php">
             <?php settings_fields(self::GENERAL_OPTION_GROUP); ?>
@@ -420,12 +447,13 @@ JS;
                     'feature_prayer_reminders' => __('Prayer Reminders', 'masjidfeed-app'),
                 );
                 foreach ($flags as $key => $label) :
+                    $events_flag_disabled = ('feature_events' === $key && '' === $events_source);
                     ?>
                     <tr>
                         <th scope="row"><?php echo esc_html($label); ?></th>
                         <td>
                             <label>
-                                <input type="checkbox" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[<?php echo esc_attr($key); ?>]" value="1" <?php checked(!empty($opts[$key])); ?> />
+                                <input type="checkbox" id="masjidfeed_flag_<?php echo esc_attr($key); ?>" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[<?php echo esc_attr($key); ?>]" value="1" <?php checked(!empty($opts[$key]) && !$events_flag_disabled); ?> <?php disabled($events_flag_disabled); ?> />
                                 <?php esc_html_e('Enabled', 'masjidfeed-app'); ?>
                             </label>
                         </td>
@@ -454,23 +482,30 @@ JS;
                     <th scope="row"><label for="masjidfeed_events_source"><?php esc_html_e('Events Plugin', 'masjidfeed-app'); ?></label></th>
                     <td>
                         <select id="masjidfeed_events_source" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[events_source]">
-                            <option value=""><?php echo esc_html('— ' . __('None', 'masjidfeed-app') . ' —'); ?></option>
-                            <?php foreach (Masjid_Feed_Event_Sources::get_choices() as $key => $choice) : ?>
-                                <option value="<?php echo esc_attr($key); ?>" <?php selected($opts['events_source'], $key); ?> <?php disabled(!$choice['available']); ?>>
+                            <option value="" <?php selected('' === $events_source); ?>><?php echo esc_html('— ' . __('None', 'masjidfeed-app') . ' —'); ?></option>
+                            <?php foreach ($choices as $key => $choice) : ?>
+                                <option value="<?php echo esc_attr($key); ?>" <?php selected($events_source, $key); ?> <?php disabled(!$choice['available']); ?>>
                                     <?php echo esc_html($choice['label'] . (!$choice['available'] ? __(' (not installed)', 'masjidfeed-app') : '')); ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
+                        <?php if ('' === $events_source) : ?>
+                            <p class="description"><?php esc_html_e('No events plugin is selected, so the Events feature flag is disabled.', 'masjidfeed-app'); ?></p>
+                        <?php endif; ?>
                     </td>
                 </tr>
             </table>
 
             <h2><?php esc_html_e('Events Filter', 'masjidfeed-app'); ?></h2>
-            <p class="description"><?php esc_html_e('Only events in the selected categories/tags will be included in the mobile app feed. Leave empty to include all events.', 'masjidfeed-app'); ?></p>
+            <p class="description masjidfeed-events-filter-description" data-for-default><?php esc_html_e('Only events in the selected categories/tags will be included in the mobile app feed. Leave empty to include all events.', 'masjidfeed-app'); ?></p>
+            <p class="description masjidfeed-events-filter-description" data-for-tec style="display:none;"><?php esc_html_e('Only events in the selected The Events Calendar categories will be included in the mobile app feed. Leave empty to include all events.', 'masjidfeed-app'); ?></p>
             <table class="form-table" role="presentation">
                 <tr>
                     <th scope="row"><?php esc_html_e('Categories', 'masjidfeed-app'); ?></th>
-                    <td><?php $this->render_term_checkboxes($categories, 'events_categories', $opts['events_categories']); ?></td>
+                    <td>
+                        <div class="masjidfeed-events-categories" data-for-default><?php $this->render_term_checkboxes($categories, 'events_categories', $opts['events_categories'], $is_tec_selected); ?></div>
+                        <div class="masjidfeed-events-categories" data-for-tec style="display:none;"><?php $this->render_term_checkboxes($this->get_events_filter_categories(Masjid_Feed_Event_Source_The_Events_Calendar::KEY, $categories), 'events_categories', $opts['events_categories'], !$is_tec_selected); ?></div>
+                    </td>
                 </tr>
                 <tr>
                     <th scope="row"><?php esc_html_e('Tags', 'masjidfeed-app'); ?></th>
@@ -622,9 +657,43 @@ JS;
     }
 
     /**
-     * Render a scrollable list of term checkboxes for a given field.
+     * Effective events source: the stored key only while that plugin is
+     * available. Falls back to empty ("None") otherwise, e.g. when no events
+     * plugin is installed or the configured plugin was deactivated.
      */
-    private function render_term_checkboxes($terms, $field, $selected) {
+    public static function resolve_events_source($opts) {
+        $key = (string) ($opts['events_source'] ?? '');
+        if ('' === $key) {
+            return '';
+        }
+        $choices = Masjid_Feed_Event_Sources::get_choices();
+        if (!isset($choices[$key]) || !$choices[$key]['available']) {
+            return '';
+        }
+        return $key;
+    }
+
+    /**
+     * Categories shown in the Events Filter for the selected events source.
+     * The Events Calendar uses its own event category taxonomy.
+     */
+    private function get_events_filter_categories($events_source, $fallback_categories) {
+        $taxonomies = Masjid_Feed_Event_Sources::get_filter_taxonomies($events_source);
+        if (Masjid_Feed_Event_Source_The_Events_Calendar::EVENTS_TAXONOMY !== $taxonomies['categories']) {
+            return $fallback_categories;
+        }
+        $terms = get_terms(array(
+            'taxonomy' => $taxonomies['categories'],
+            'hide_empty' => false,
+        ));
+        return is_wp_error($terms) ? array() : (array) $terms;
+    }
+
+    /**
+     * Render a scrollable list of term checkboxes for a given field. Disabled
+     * checkboxes are not submitted with the form.
+     */
+    private function render_term_checkboxes($terms, $field, $selected, $disabled = false) {
         if (empty($terms)) {
             echo '<p class="description">' . esc_html__('No terms found.', 'masjidfeed-app') . '</p>';
             return;
@@ -633,11 +702,12 @@ JS;
         echo '<div style="max-height:150px;overflow-y:auto;border:1px solid #ddd;padding:8px;max-width:400px;">';
         foreach ($terms as $term) {
             printf(
-                '<label style="display:block;"><input type="checkbox" name="%1$s[%2$s][]" value="%3$d" %4$s /> %5$s</label>',
+                '<label style="display:block;"><input type="checkbox" name="%1$s[%2$s][]" value="%3$d" %4$s %5$s /> %6$s</label>',
                 esc_attr(MASJIDFEED_OPTION_KEY),
                 esc_attr($field),
                 (int) $term->term_id,
                 checked(in_array($term->term_id, $selected, true), true, false),
+                disabled($disabled, true, false),
                 esc_html($term->name)
             );
         }

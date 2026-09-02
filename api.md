@@ -470,12 +470,21 @@ Posts with event dates enabled also contain these event fields:
 
 ### `GET /events`
 
-Returns an array containing at most 20 published upcoming events, ordered by
-event date ascending. Site settings may filter the result by category or tag.
+Returns an array of published upcoming events, ordered by event date ascending.
+Site settings may filter the result by category or tag.
+
+Query parameters:
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `limit` | integer | `20` | Maximum number of events to return. Values above `100` are capped at `100`. |
 
 ```sh
 curl --fail-with-body --silent --show-error \
   "$BASE_URL/events"
+
+curl --fail-with-body --silent --show-error \
+  "$BASE_URL/events?limit=50"
 ```
 
 Example response:
@@ -510,14 +519,23 @@ Events and The Events Calendar.
 
 ### `GET /announcements`
 
-Returns an array containing at most 20 published, non-password-protected posts,
-ordered by publication date descending. Site settings may filter the result by
-category or tag. Administrators may also select a Friday category that replaces
-the regular announcement filters on Fridays in the WordPress site timezone.
+Returns an array of published, non-password-protected posts, ordered by
+publication date descending. Site settings may filter the result by category or
+tag. Administrators may also select a Friday category that replaces the regular
+announcement filters on Fridays in the WordPress site timezone.
+
+Query parameters:
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `limit` | integer | `20` | Maximum number of announcements to return. Values above `100` are capped at `100`. |
 
 ```sh
 curl --fail-with-body --silent --show-error \
   "$BASE_URL/announcements"
+
+curl --fail-with-body --silent --show-error \
+  "$BASE_URL/announcements?limit=50"
 ```
 
 Example response:

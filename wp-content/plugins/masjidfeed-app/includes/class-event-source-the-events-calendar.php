@@ -10,15 +10,18 @@ if (!defined('ABSPATH')) { exit; }
 
 class Masjid_Feed_Event_Source_The_Events_Calendar implements Masjid_Feed_Event_Source {
 
+    const KEY = 'the_events_calendar';
     const POST_TYPE = 'tribe_events';
     const EVENTS_TAXONOMY = 'tribe_events_cat';
     const ARCHIVE_ROUTE = '/tribe/events/v1/events';
     const SINGLE_ROUTE = '/tribe/events/v1/events/%d';
-    const MAX_EVENTS = 20;
+    const MAX_EVENTS = 100;
+    const DEFAULT_LIMIT = 20;
     const MAX_PAGES = 5;
+    const PER_PAGE = 50;
 
     public function get_key() {
-        return 'the_events_calendar';
+        return self::KEY;
     }
 
     public function get_label() {
@@ -32,12 +35,14 @@ class Masjid_Feed_Event_Source_The_Events_Calendar implements Masjid_Feed_Event_
         return (bool) (new Tribe__Events__REST__V1__System())->tec_rest_api_is_enabled();
     }
 
-    public function get_upcoming_events($opts) {
+    public function get_upcoming_events($opts, $limit = null) {
         $events = array();
+        $limit = min(absint(null === $limit ? self::DEFAULT_LIMIT : $limit), self::MAX_EVENTS);
 
-        for ($page = 1; $page <= self::MAX_PAGES && count($events) < self::MAX_EVENTS; $page++) {
+        for ($page = 1; $page <= self::MAX_PAGES && count($events) < $limit; $page++) {
+            $per_page = min($limit - count($events), self::PER_PAGE);
             $request = new WP_REST_Request('GET', self::ARCHIVE_ROUTE);
-            $request->set_param('per_page', self::MAX_EVENTS);
+            $request->set_param('per_page', $per_page);
             $request->set_param('page', $page);
             $request->set_param('start_date', current_time('Y-m-d H:i:s'));
             $request->set_param('status', 'publish');
@@ -65,12 +70,12 @@ class Masjid_Feed_Event_Source_The_Events_Calendar implements Masjid_Feed_Event_
                     $events[] = $this->build_event_post(absint($event['id']), $event);
                 }
             }
-            if (count($data['events']) < self::MAX_EVENTS) {
+            if (count($data['events']) < $per_page) {
                 break;
             }
         }
 
-        return array_slice($events, 0, self::MAX_EVENTS);
+        return array_slice($events, 0, $limit);
     }
 
     public function build_post($post_id) {
@@ -98,7 +103,42 @@ class Masjid_Feed_Event_Source_The_Events_Calendar implements Masjid_Feed_Event_
         $data['location'] = $this->get_venue_name($event);
         $data['eventDateTime'] = $this->get_start_datetime_iso($event);
         $data['recurrenceRule'] = null;
+        $data['category'] = $this->get_event_category_slug($post_id, $event);
         return $data;
+    }
+
+    /**
+     * Slug of the event's The Events Calendar category, preferring the first
+     * non-"uncategorized" term.
+     */
+    private function get_event_category_slug($post_id, array $event) {
+        $categories = isset($event['categories']) && is_array($event['categories']) ? $event['categories'] : array();
+        $first = '';
+        foreach ($categories as $category) {
+            if (!is_array($category) || !isset($category['slug'])) {
+                continue;
+            }
+            if ('uncategorized' !== $category['slug']) {
+                return (string) $category['slug'];
+            }
+            if ('' === $first) {
+                $first = (string) $category['slug'];
+            }
+        }
+        if ('' !== $first) {
+            return $first;
+        }
+
+        $terms = get_the_terms($post_id, self::EVENTS_TAXONOMY);
+        if (!is_array($terms)) {
+            return '';
+        }
+        foreach ($terms as $term) {
+            if ($term instanceof WP_Term && 'uncategorized' !== $term->slug) {
+                return $term->slug;
+            }
+        }
+        return isset($terms[0]) && $terms[0] instanceof WP_Term ? $terms[0]->slug : '';
     }
 
     private function get_venue_name(array $event) {

@@ -14,7 +14,8 @@ if (!defined('ABSPATH')) { exit; }
 class Masjid_Feed_Event_Source_Awesome_Calendar_Events implements Masjid_Feed_Event_Source {
 
     const REST_ROUTE = '/awecal/v1/events';
-    const MAX_EVENTS = 20;
+    const MAX_EVENTS = 100;
+    const DEFAULT_LIMIT = 20;
     const MAX_PAGES = 10;
 
     public function get_key() {
@@ -29,12 +30,13 @@ class Masjid_Feed_Event_Source_Awesome_Calendar_Events implements Masjid_Feed_Ev
         return class_exists('Awesome_Calendar_Events_Plugin');
     }
 
-    public function get_upcoming_events($opts) {
+    public function get_upcoming_events($opts, $limit = null) {
         $events = array();
+        $limit = min(absint(null === $limit ? self::DEFAULT_LIMIT : $limit), self::MAX_EVENTS);
         $page_token = '';
         $today = current_time('Y-m-d');
 
-        for ($page = 0; $page < self::MAX_PAGES && count($events) < self::MAX_EVENTS; $page++) {
+        for ($page = 0; $page < self::MAX_PAGES && count($events) < $limit; $page++) {
             $request = new WP_REST_Request('GET', self::REST_ROUTE);
             $request->set_param('expand_recurring', true);
             $request->set_param('per_page', 100);
@@ -74,7 +76,7 @@ class Masjid_Feed_Event_Source_Awesome_Calendar_Events implements Masjid_Feed_Ev
             }
         }
 
-        return array_slice($events, 0, self::MAX_EVENTS);
+        return array_slice($events, 0, $limit);
     }
 
     private function get_response_header($response, $name) {

@@ -16,6 +16,7 @@ class Masjid_Feed_REST_API {
 
     const NAMESPACE_ = 'masjid/v1';
     const LIST_LIMIT = 20;
+    const MAX_LIMIT = 100;
     const CLIENT_CACHE_TTL = 60;
     const SERVER_CACHE_TTL = DAY_IN_SECONDS;
     const CONFIG_CACHE_KEY = 'masjidfeed_config_response_v6';
@@ -96,12 +97,14 @@ class Masjid_Feed_REST_API {
             'methods' => 'GET',
             'callback' => array($this, 'get_events'),
             'permission_callback' => '__return_true',
+            'args' => $this->get_list_route_args(),
         ));
 
         register_rest_route(self::NAMESPACE_, '/announcements', array(
             'methods' => 'GET',
             'callback' => array($this, 'get_announcements'),
             'permission_callback' => '__return_true',
+            'args' => $this->get_list_route_args(),
         ));
 
         $post_route = array(
@@ -218,6 +221,36 @@ class Masjid_Feed_REST_API {
     }
 
     /**
+     * Shared query args for list endpoints.
+     */
+    private function get_list_route_args() {
+        return array(
+            'limit' => array(
+                'type' => 'integer',
+                'required' => false,
+                'default' => self::LIST_LIMIT,
+                'minimum' => 1,
+                'maximum' => self::MAX_LIMIT,
+                'sanitize_callback' => function($value) {
+                    return self::resolve_list_limit($value);
+                },
+            ),
+        );
+    }
+
+    /**
+     * Resolve the list limit: default 20, values below 1 fall back to the
+     * default, values above 100 are capped at 100.
+     */
+    public static function resolve_list_limit($value) {
+        $value = absint($value);
+        if ($value < 1) {
+            return self::LIST_LIMIT;
+        }
+        return min($value, self::MAX_LIMIT);
+    }
+
+    /**
      * GET /events
      */
     public function get_events($request) {
@@ -231,19 +264,20 @@ class Masjid_Feed_REST_API {
             );
         }
 
-        $cached_response = $this->get_cached_response($request, self::EVENTS_CACHE_KEY, self::EVENTS_SHARED_CACHE_TTL);
+        $limit = self::resolve_list_limit($request->get_param('limit'));
+
+        $cached_response = $this->get_cached_list_response($request, self::EVENTS_CACHE_KEY, $limit, self::EVENTS_SHARED_CACHE_TTL);
         if ($cached_response) {
             return $cached_response;
         }
 
-        $events = $source->get_upcoming_events($opts);
+        $events = $source->get_upcoming_events($opts, self::MAX_LIMIT);
 
         usort($events, function($first, $second) {
             return strcmp((string) $first['eventDateTime'], (string) $second['eventDateTime']);
         });
-        $events = array_slice($events, 0, self::LIST_LIMIT);
 
-        return $this->cache_response($request, self::EVENTS_CACHE_KEY, $events, self::EVENTS_SHARED_CACHE_TTL);
+        return $this->cache_list_response($request, self::EVENTS_CACHE_KEY, $events, $limit, self::EVENTS_SHARED_CACHE_TTL);
     }
 
     /**
@@ -257,14 +291,18 @@ class Masjid_Feed_REST_API {
             $now,
             !empty($opts['friday_announcements_category'])
         );
+        $limit = self::resolve_list_limit($request->get_param('limit'));
+        $etag_variant = $use_friday_category ? 'friday' : 'regular';
         $cache_key = $use_friday_category
             ? self::FRIDAY_ANNOUNCEMENTS_CACHE_KEY
             : self::REGULAR_ANNOUNCEMENTS_CACHE_KEY;
 
-        $cached_response = $this->get_cached_response(
+        $cached_response = $this->get_cached_list_response(
             $request,
             $cache_key,
+            $limit,
             $shared_ttl,
+            $etag_variant,
             $client_ttl
         );
         if ($cached_response) {
@@ -275,7 +313,7 @@ class Masjid_Feed_REST_API {
             'post_type' => 'post',
             'post_status' => 'publish',
             'has_password' => false,
-            'posts_per_page' => self::LIST_LIMIT,
+            'posts_per_page' => self::MAX_LIMIT,
             'no_found_rows' => true,
             'orderby' => 'date',
             'order' => 'DESC',
@@ -302,12 +340,13 @@ class Masjid_Feed_REST_API {
             wp_reset_postdata();
         }
 
-        return $this->cache_response(
+        return $this->cache_list_response(
             $request,
             $cache_key,
             $announcements,
+            $limit,
             $shared_ttl,
-            $use_friday_category ? 'friday' : 'regular',
+            $etag_variant,
             $client_ttl
         );
     }
@@ -514,7 +553,7 @@ class Masjid_Feed_REST_API {
      * Cache a payload and return it with HTTP cache headers.
      */
     private function cache_response($request, $cache_key, $data, $shared_ttl, $etag_variant = '', $client_ttl = self::CLIENT_CACHE_TTL) {
-        $etag = 'W/"' . hash('sha256', $etag_variant . wp_json_encode($data)) . '"';
+        $etag = $this->compute_etag($data, $etag_variant);
 
         set_transient($cache_key, array(
             'data' => $data,
@@ -522,6 +561,38 @@ class Masjid_Feed_REST_API {
         ), self::SERVER_CACHE_TTL);
 
         return $this->build_cacheable_response($request, $data, $etag, $shared_ttl, $client_ttl);
+    }
+
+    /**
+     * Return a cached list payload sliced to the requested limit. The shared
+     * cache always holds the full payload, so every limit value is served
+     * from the same cache entry with its own ETag.
+     */
+    private function get_cached_list_response($request, $cache_key, $limit, $shared_ttl, $etag_variant = '', $client_ttl = self::CLIENT_CACHE_TTL) {
+        $cached = get_transient($cache_key);
+        if (!is_array($cached) || !isset($cached['data']) || !is_array($cached['data'])) {
+            return null;
+        }
+
+        $data = array_slice($cached['data'], 0, $limit);
+        return $this->build_cacheable_response($request, $data, $this->compute_etag($data, $etag_variant), $shared_ttl, $client_ttl);
+    }
+
+    /**
+     * Cache a full list payload and return it sliced to the requested limit.
+     */
+    private function cache_list_response($request, $cache_key, $data, $limit, $shared_ttl, $etag_variant = '', $client_ttl = self::CLIENT_CACHE_TTL) {
+        set_transient($cache_key, array('data' => $data), self::SERVER_CACHE_TTL);
+
+        $data = array_slice($data, 0, $limit);
+        return $this->build_cacheable_response($request, $data, $this->compute_etag($data, $etag_variant), $shared_ttl, $client_ttl);
+    }
+
+    /**
+     * Compute the weak ETag for a payload.
+     */
+    private function compute_etag($data, $variant = '') {
+        return 'W/"' . hash('sha256', $variant . wp_json_encode($data)) . '"';
     }
 
     /**

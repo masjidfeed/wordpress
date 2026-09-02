@@ -23,7 +23,7 @@ under the `masjid/v1` namespace:
 
 * `/wp-json/masjid/v1/config` — app configuration (branding, contact, feature flags)
 * `/wp-json/masjid/v1/salahapi` — SalahAPI prayer time configuration (proxied from Muslim Prayer Times)
-* `/wp-json/masjid/v1/events` — up to 20 upcoming post objects with event fields
+* `/wp-json/masjid/v1/events` — up to 100 upcoming post objects with event fields (limit parameter, default 20)
 * `/wp-json/masjid/v1/announcements` — up to 20 announcement post objects
 * `/wp-json/masjid/v1/posts/{id}` — one published post with optional event fields
 * `/wp-json/masjid/v1/push/registrations` — App Check-protected FCM topic registration
