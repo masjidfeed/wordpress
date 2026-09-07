@@ -123,57 +123,51 @@ class Masjid_Feed_Settings {
 
     private function events_source_js() {
         $flag_id = 'masjidfeed_flag_feature_events';
-        return <<<JS
-jQuery(function($) {
-    var source = $('#masjidfeed_events_source');
-    var flag = $('#{$flag_id}');
-    function sync() {
-        var value = source.val();
-        var none = '' === value;
-        var isTec = 'the_events_calendar' === value;
-        flag.prop('disabled', none);
-        if (none) {
-            flag.prop('checked', false);
-        }
-        $('[data-for-default]').toggle(!isTec).find('input[type=checkbox]').prop('disabled', isTec);
-        $('[data-for-tec]').toggle(isTec).find('input[type=checkbox]').prop('disabled', !isTec);
-    }
-    source.on('change', sync);
-    sync();
-});
-JS;
+        return "jQuery(function(\$) {\n"
+            . "    var source = \$('#masjidfeed_events_source');\n"
+            . "    var flag = \$('#" . $flag_id . "');\n"
+            . "    function sync() {\n"
+            . "        var value = source.val();\n"
+            . "        var none = '' === value;\n"
+            . "        var isTec = 'the_events_calendar' === value;\n"
+            . "        flag.prop('disabled', none);\n"
+            . "        if (none) {\n"
+            . "            flag.prop('checked', false);\n"
+            . "        }\n"
+            . "        \$('[data-for-default]').toggle(!isTec).find('input[type=checkbox]').prop('disabled', isTec);\n"
+            . "        \$('[data-for-tec]').toggle(isTec).find('input[type=checkbox]').prop('disabled', !isTec);\n"
+            . "    }\n"
+            . "    source.on('change', sync);\n"
+            . "    sync();\n"
+            . "});";
     }
 
     private function color_picker_js() {
-        return <<<'JS'
-jQuery(function($) {
-    $('.masjidapp-color-picker').wpColorPicker();
-});
-JS;
+        return "jQuery(function(\$) {\n"
+            . "    \$('.masjidapp-color-picker').wpColorPicker();\n"
+            . "});";
     }
 
     private function media_picker_js() {
-        return <<<'JS'
-jQuery(function($) {
-    $('.masjidapp-media-picker').on('click', function(e) {
-        e.preventDefault();
-        var button = $(this);
-        var targetInput = $('#' + button.data('target'));
-        var previewImg = $('#' + button.data('preview'));
-        var frame = wp.media({
-            title: 'Select Image',
-            button: { text: 'Use this image' },
-            multiple: false
-        });
-        frame.on('select', function() {
-            var attachment = frame.state().get('selection').first().toJSON();
-            targetInput.val(attachment.id);
-            previewImg.attr('src', attachment.url).show();
-        });
-        frame.open();
-    });
-});
-JS;
+        return "jQuery(function(\$) {\n"
+            . "    \$('.masjidapp-media-picker').on('click', function(e) {\n"
+            . "        e.preventDefault();\n"
+            . "        var button = \$(this);\n"
+            . "        var targetInput = \$('#' + button.data('target'));\n"
+            . "        var previewImg = \$('#' + button.data('preview'));\n"
+            . "        var frame = wp.media({\n"
+            . "            title: 'Select Image',\n"
+            . "            button: { text: 'Use this image' },\n"
+            . "            multiple: false\n"
+            . "        });\n"
+            . "        frame.on('select', function() {\n"
+            . "            var attachment = frame.state().get('selection').first().toJSON();\n"
+            . "            targetInput.val(attachment.id);\n"
+            . "            previewImg.attr('src', attachment.url).show();\n"
+            . "        });\n"
+            . "        frame.open();\n"
+            . "    });\n"
+            . "});";
     }
 
     /**

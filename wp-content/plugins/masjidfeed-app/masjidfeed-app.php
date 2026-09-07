@@ -1,18 +1,18 @@
 <?php
 /**
  * Plugin Name: MasjidFeed App
- * Plugin URI: https://bothellmosque.org
+ * Plugin URI: https://github.com/masjidfeed/wordpress
  * Description: WordPress backend for the MasjidFeed mobile app. Powers the app's config, prayer times, events, and announcements over a REST API.
  * Version: 1.0.0
- * Author: ICOB Team
- * Author URI: https://bothellmosque.org
+ * Author: stankovski
+ * Author URI: https://goodsoftware.foundation/
  * Text Domain: masjidfeed-app
  * Requires at least: 6.0
  * Tested up to: 7.1
  * Requires PHP: 8.1
  * Requires Plugins: muslim-prayer-times
- * License: GPL v2 or later
- * License URI: https://www.gnu.org/licenses/gpl-2.0.html
+ * License: MIT
+ * License URI: https://github.com/masjidfeed/wordpress/blob/main/LICENSE
  */
 
 // Prevent direct access
