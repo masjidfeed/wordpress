@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 define('ABSPATH', __DIR__ . '/');
 define('MASJIDFEED_OPTION_KEY', 'masjidfeed_settings');
+define('MASJIDFEED_CREDENTIAL_OPTION_KEY', 'masjidfeed_firebase_credentials');
 define('MINUTE_IN_SECONDS', 60);
 define('HOUR_IN_SECONDS', 3600);
 
@@ -197,6 +198,29 @@ if (!function_exists('update_option')) {
     function update_option($key, $value, $autoload = null) {
         $GLOBALS['__test_options'][$key] = $value;
         return true;
+    }
+}
+
+if (!function_exists('add_option')) {
+    function add_option($key, $value = '', $deprecated = '', $autoload = null) {
+        if (array_key_exists($key, $GLOBALS['__test_options'])) {
+            return false;
+        }
+        $GLOBALS['__test_options'][$key] = $value;
+        return true;
+    }
+}
+
+if (!function_exists('delete_option')) {
+    function delete_option($key) {
+        unset($GLOBALS['__test_options'][$key]);
+        return true;
+    }
+}
+
+if (!function_exists('wp_json_encode')) {
+    function wp_json_encode($value, $flags = 0, $depth = 512) {
+        return json_encode($value, $flags, $depth);
     }
 }
 
@@ -477,8 +501,11 @@ $plugin_dir = dirname(__DIR__) . '/wp-content/plugins/masjidfeed-app';
 require_once $plugin_dir . '/vendor-prefixed/autoload.php';
 require_once $plugin_dir . '/includes/class-firebase-exceptions.php';
 require_once $plugin_dir . '/includes/class-firebase-client.php';
+require_once $plugin_dir . '/includes/class-credential-store.php';
 require_once $plugin_dir . '/includes/class-firebase.php';
 require_once $plugin_dir . '/includes/class-push-notifications.php';
+require_once $plugin_dir . '/includes/class-api-trace.php';
+require_once $plugin_dir . '/includes/class-legacy-settings-migrator.php';
 require_once $plugin_dir . '/includes/class-settings.php';
 require_once $plugin_dir . '/includes/class-event-sources.php';
 require_once $plugin_dir . '/includes/class-event-source-awesome-calendar-events.php';

@@ -91,6 +91,7 @@ class Masjid_Feed_Plugin {
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-firebase.php';
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-push-notifications.php';
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-api-trace.php';
+        require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-legacy-settings-migrator.php';
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-settings.php';
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-content-only-renderer.php';
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-event-sources.php';
@@ -99,6 +100,7 @@ class Masjid_Feed_Plugin {
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-rest-api.php';
 
         new Masjid_Feed_API_Trace();
+        new Masjid_Feed_Legacy_Settings_Migrator();
         new Masjid_Feed_Settings();
         new Masjid_Feed_Content_Only_Renderer();
         new Masjid_Feed_REST_API();
@@ -106,7 +108,11 @@ class Masjid_Feed_Plugin {
     }
 
     public function activate() {
+        require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-credential-store.php';
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-push-notifications.php';
+        require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-api-trace.php';
+        require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-legacy-settings-migrator.php';
+        Masjid_Feed_Legacy_Settings_Migrator::migrate();
         Masjid_Feed_Push_Notifications::create_table();
         update_option('masjidfeed_db_version', MASJIDFEED_DB_VERSION, false);
         if (!wp_next_scheduled('masjidfeed_cleanup_push_jobs')) {

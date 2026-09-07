@@ -76,6 +76,13 @@ class Masjid_Feed_Credential_Store {
             return MASJIDFEED_CREDENTIAL_KEY;
         }
         $environment_key = getenv('MASJIDFEED_CREDENTIAL_KEY');
-        return is_string($environment_key) ? $environment_key : '';
+        if (is_string($environment_key) && '' !== $environment_key) {
+            return $environment_key;
+        }
+        if (defined('MASJIDAPP_CREDENTIAL_KEY') && is_string(MASJIDAPP_CREDENTIAL_KEY)) {
+            return MASJIDAPP_CREDENTIAL_KEY;
+        }
+        $legacy_environment_key = getenv('MASJIDAPP_CREDENTIAL_KEY');
+        return is_string($legacy_environment_key) ? $legacy_environment_key : '';
     }
 }

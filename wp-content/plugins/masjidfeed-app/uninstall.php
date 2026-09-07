@@ -12,6 +12,7 @@ delete_option('masjidfeed_firebase_credentials');
 delete_option('masjidfeed_api_trace_enabled');
 delete_option('masjidfeed_api_trace_entries');
 delete_option('masjidfeed_db_version');
+delete_option('masjidfeed_legacy_migration_error');
 
 wp_clear_scheduled_hook('masjidfeed_maybe_enqueue_first_publish');
 wp_clear_scheduled_hook('masjidfeed_process_push_job');

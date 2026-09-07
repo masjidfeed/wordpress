@@ -45,6 +45,23 @@ are provided by an events plugin selected in settings: "Awesome Calendar
 Events" or "The Events Calendar". When no events plugin is selected, the
 Events feature is disabled.
 
+== Upgrading from Masjid App ==
+
+Install and activate MasjidFeed App before deleting the legacy Masjid App
+plugin. Activation imports the legacy settings, Firebase credentials, API trace
+setting, and retained trace entries. Values already configured in MasjidFeed
+App take precedence.
+
+The legacy plugin's uninstall handler deletes its stored options, so deleting
+it before activating MasjidFeed App leaves no settings to import. It is safe to
+deactivate the legacy plugin first, activate MasjidFeed App, verify the
+settings, and then delete the legacy plugin.
+
+Firebase credentials are decrypted with the previous
+`MASJIDAPP_CREDENTIAL_KEY` and re-encrypted for MasjidFeed App. Sites may keep
+using that legacy key name, although migrating the same value to
+`MASJIDFEED_CREDENTIAL_KEY` is recommended.
+
 == Push Notifications ==
 
 The **Settings → MasjidFeed App → Push Notifications** section accepts a Firebase
