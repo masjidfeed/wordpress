@@ -98,6 +98,46 @@ deploying to WordPress.org. The build prefixes dependencies under
 `Masjid_Feed\\Dependencies` and produces the self-contained `vendor-prefixed`
 directory used at runtime.
 
+== External services ==
+
+This plugin connects to Google Firebase, a push messaging platform provided by
+Google. It is needed to deliver the push notifications that the MasjidFeed
+mobile app receives (new events and announcements posted on this site). The
+connection is optional: it is only used when Push Notifications are configured
+on the **Settings → MasjidFeed App** page with a Firebase service account.
+
+What is sent and when:
+
+* **Google OAuth 2.0 token endpoint** (`oauth2.googleapis.com/token`): a signed
+  JWT assertion built from the service account's email and project ID is sent
+  to obtain a short-lived Firebase access token. This happens whenever a
+  notification is queued or a topic registration is processed and no
+  unexpired token is cached.
+* **Firebase Cloud Messaging** (`fcm.googleapis.com`): when an admin publishes
+  a post that carries the configured trigger tag (or re-sends it from the post
+  editor), the notification payload is sent: the post title, an excerpt-style
+  body, the publicly accessible featured-image URL (if set), the post URL or
+  deep link, and the Firebase topic name. No visitor or subscriber data is
+  sent by the plugin itself.
+* **Firebase Instance ID** (`iid.googleapis.com`): when a device registers for
+  push notifications through the app, the app-supplied device registration
+  token and topic name are forwarded so the device can be added to or removed
+  from the topic.
+* **Firebase App Check** (`firebaseappcheck.googleapis.com`): the plugin
+  downloads Firebase's public signing keys to verify App Check tokens that
+  the mobile app attaches to the registration endpoint. No site data is sent
+  in this request; it is a read-only fetch of public keys, cached for one
+  hour.
+
+The Firebase service account credentials entered by the admin are stored
+encrypted in the WordPress database and are used to sign these requests; they
+are never sent to any service other than Google's Firebase endpoints listed
+above.
+
+This service is provided by Google. Terms of Service:
+https://firebase.google.com/terms — Privacy Policy:
+https://policies.google.com/privacy
+
 == Changelog ==
 
 = 1.0.0 =
