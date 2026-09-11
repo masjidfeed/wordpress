@@ -222,8 +222,9 @@ class Masjid_Feed_Firebase_Client {
         }
         $data = json_decode($response['body'], true);
         if (!is_array($data)) {
-            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- message from a remote API response; any display escapes it.
-            throw new Masjid_Feed_Firebase_Server_Error($this->error_message($response, 'The Firebase API returned a malformed JSON response.'));
+            $exception = new Masjid_Feed_Firebase_Server_Error($this->error_message($response, 'The Firebase API returned a malformed JSON response.'));
+            $exception->set_response_details((int) $response['status'], (string) $response['body']);
+            throw $exception;
         }
         return $data;
     }
@@ -233,21 +234,30 @@ class Masjid_Feed_Firebase_Client {
         $retry_after = $this->parse_retry_after($this->header($response, 'Retry-After'));
         switch ($response['status']) {
             case 400:
-                return new Masjid_Feed_Firebase_Invalid_Message($message);
+                $exception = new Masjid_Feed_Firebase_Invalid_Message($message);
+                break;
             case 401:
             case 403:
-                return new Masjid_Feed_Firebase_Authentication_Error($message);
+                $exception = new Masjid_Feed_Firebase_Authentication_Error($message);
+                break;
             case 404:
-                return new Masjid_Feed_Firebase_Not_Found($message);
+                $exception = new Masjid_Feed_Firebase_Not_Found($message);
+                break;
             case 429:
-                return new Masjid_Feed_Firebase_Quota_Exceeded($message, 0, null, $retry_after);
+                $exception = new Masjid_Feed_Firebase_Quota_Exceeded($message, 0, null, $retry_after);
+                break;
             case 500:
-                return new Masjid_Feed_Firebase_Server_Error($message);
+                $exception = new Masjid_Feed_Firebase_Server_Error($message);
+                break;
             case 503:
-                return new Masjid_Feed_Firebase_Server_Unavailable($message, 0, null, $retry_after);
+                $exception = new Masjid_Feed_Firebase_Server_Unavailable($message, 0, null, $retry_after);
+                break;
             default:
-                return new Masjid_Feed_Firebase_Exception($message, $response['status']);
+                $exception = new Masjid_Feed_Firebase_Exception($message, $response['status']);
+                break;
         }
+        $exception->set_response_details((int) $response['status'], (string) $response['body']);
+        return $exception;
     }
 
     private function error_message(array $response, string $fallback): string {

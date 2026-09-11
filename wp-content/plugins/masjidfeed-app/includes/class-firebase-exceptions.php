@@ -8,6 +8,8 @@ if (!defined('ABSPATH')) { exit; }
 class Masjid_Feed_Firebase_Exception extends RuntimeException {
 
     private $retry_after;
+    private $http_status = 0;
+    private $response_body = '';
 
     public function __construct($message = '', $code = 0, ?Throwable $previous = null, ?int $retry_after = null) {
         parent::__construct($message, $code, $previous);
@@ -20,6 +22,19 @@ class Masjid_Feed_Firebase_Exception extends RuntimeException {
 
     public function retry_after(): ?int {
         return $this->retry_after;
+    }
+
+    public function set_response_details(int $http_status, string $response_body): void {
+        $this->http_status = $http_status;
+        $this->response_body = substr($response_body, 0, 2000);
+    }
+
+    public function http_status(): int {
+        return $this->http_status;
+    }
+
+    public function response_body(): string {
+        return $this->response_body;
     }
 }
 

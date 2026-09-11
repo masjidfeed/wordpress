@@ -403,17 +403,45 @@ class Masjid_Feed_REST_API {
             }
             return new WP_REST_Response(array('registered' => true, 'result' => $this->summarize_topic_result($result)), 200);
         } catch (Throwable $exception) {
-            return new WP_Error('masjidfeed_firebase_registration_failed', __('The device could not be registered for push notifications.', 'masjidfeed-app'), array('status' => 502));
+            $error = new WP_Error('masjidfeed_firebase_registration_failed', __('The device could not be registered for push notifications.', 'masjidfeed-app'), array('status' => 502));
+            $error->add_data($this->firebase_failure_diagnostics($exception, array($token, $previous_token)), 'masjidfeed_firebase_registration_failed');
+            return $error;
         }
     }
 
     public function unregister_push_token($request) {
+        $token = trim((string) $request->get_param('token'));
         try {
-            $result = $this->authorized_firebase->unsubscribe(trim((string) $request->get_param('token')));
+            $result = $this->authorized_firebase->unsubscribe($token);
             return new WP_REST_Response(array('registered' => false, 'result' => $this->summarize_topic_result($result)), 200);
         } catch (Throwable $exception) {
-            return new WP_Error('masjidfeed_firebase_unregistration_failed', __('The device could not be unregistered from push notifications.', 'masjidfeed-app'), array('status' => 502));
+            $error = new WP_Error('masjidfeed_firebase_unregistration_failed', __('The device could not be unregistered from push notifications.', 'masjidfeed-app'), array('status' => 502));
+            $error->add_data($this->firebase_failure_diagnostics($exception, array($token)), 'masjidfeed_firebase_unregistration_failed');
+            return $error;
         }
+    }
+
+    private function firebase_failure_diagnostics($exception, array $secrets = array()) {
+        $details = array(
+            'exception' => get_class($exception),
+            'message' => $exception->getMessage(),
+        );
+        if ($exception instanceof Masjid_Feed_Firebase_Exception) {
+            $details['httpStatus'] = $exception->http_status();
+            $details['responseBody'] = $exception->response_body();
+        }
+        foreach ($details as $key => $value) {
+            if (!is_string($value)) {
+                continue;
+            }
+            foreach ($secrets as $secret) {
+                if ('' !== $secret) {
+                    $value = str_replace($secret, '[redacted]', $value);
+                }
+            }
+            $details[$key] = $value;
+        }
+        return array('firebase' => $details);
     }
 
     public function authorize_push_registration($request) {

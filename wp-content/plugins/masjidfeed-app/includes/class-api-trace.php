@@ -77,10 +77,14 @@ class Masjid_Feed_API_Trace {
 
         $status = 200;
         $error_code = '';
+        $firebase_details = array();
         if (is_wp_error($response)) {
             $error_code = (string) $response->get_error_code();
             $error_data = $response->get_error_data();
             $status = is_array($error_data) && isset($error_data['status']) ? absint($error_data['status']) : 500;
+            if (is_array($error_data) && !empty($error_data['firebase'])) {
+                $firebase_details = (array) $error_data['firebase'];
+            }
         } elseif ($response instanceof WP_HTTP_Response) {
             $status = $response->get_status();
         }
@@ -103,6 +107,9 @@ class Masjid_Feed_API_Trace {
             'userAgent' => $user_agent,
             'parameters' => self::redact($request->get_params()),
         );
+        if ($firebase_details) {
+            $entry['payload'] = self::redact($firebase_details);
+        }
 
         self::add_entry($entry);
 

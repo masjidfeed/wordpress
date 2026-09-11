@@ -139,6 +139,20 @@ class FirebaseClientHttpTest extends FirebaseClientTestCase {
             $this->assertSame($retryable, $exception->is_retryable());
             $this->assertStringContainsString('Boom', $exception->getMessage());
             $this->assertStringContainsString('(HTTP ' . $status . ')', $exception->getMessage());
+            $this->assertSame($status, $exception->http_status());
+            $this->assertStringContainsString('Boom', $exception->response_body());
+        }
+    }
+
+    public function test_subscribe_http_failure_carries_response_details(): void {
+        $body = json_encode(['error' => ['code' => 404, 'message' => 'Topic not found']]);
+        $client = $this->token_cached_client($this->transport(404, [], $body));
+        try {
+            $client->subscribe_to_topic('masjid_x', 'device-token');
+            $this->fail('Expected an exception.');
+        } catch (Masjid_Feed_Firebase_Exception $exception) {
+            $this->assertSame(404, $exception->http_status());
+            $this->assertSame($body, $exception->response_body());
         }
     }
 
