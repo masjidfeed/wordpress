@@ -3,10 +3,11 @@
  * Event source backed by the Awesome Calendar Events plugin.
  *
  * Upcoming events are fetched from that plugin's public query API
- * (GET /wp-json/awecal/v1/events, documented in its API.md) in expansion
- * mode, so recurring events are materialized into one feed item per
- * upcoming occurrence. Single post payloads read the `_awecal_` meta keys
- * with a transparent fallback to the legacy `_icob_` prefix.
+ * (GET /wp-json/awecal/v1/events, documented in its API.md) without
+ * recurring-event expansion, so each feed item represents the event post
+ * itself and clients expand occurrences from the recurrence rule. Single
+ * post payloads read the `_awecal_` meta keys with a transparent fallback
+ * to the legacy `_icob_` prefix.
  */
 
 if (!defined('ABSPATH')) { exit; }
@@ -34,14 +35,10 @@ class Masjid_Feed_Event_Source_Awesome_Calendar_Events implements Masjid_Feed_Ev
         $events = array();
         $limit = min(absint(null === $limit ? self::DEFAULT_LIMIT : $limit), self::MAX_EVENTS);
         $page_token = '';
-        $today = current_time('Y-m-d');
 
         for ($page = 0; $page < self::MAX_PAGES && count($events) < $limit; $page++) {
             $request = new WP_REST_Request('GET', self::REST_ROUTE);
-            $request->set_param('expand_recurring', true);
             $request->set_param('per_page', 100);
-            $request->set_param('date_from', $today);
-            $request->set_param('date_to', gmdate('Y-m-d', strtotime($today . ' +1 year')));
 
             $categories = Masjid_Feed_Event_Sources::get_term_slugs($opts['events_categories'] ?? array(), 'category');
             if ($categories) {
