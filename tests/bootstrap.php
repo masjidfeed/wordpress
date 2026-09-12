@@ -33,6 +33,10 @@ if (!function_exists('is_wp_error')) {
 
 if (!function_exists('wp_remote_request')) {
     function wp_remote_request($url, $args = array()) {
+        $GLOBALS['__test_wp_remote_requests'][] = ['url' => $url, 'args' => $args];
+        if (isset($GLOBALS['__test_wp_remote_request_response'])) {
+            return $GLOBALS['__test_wp_remote_request_response'];
+        }
         return new WP_Error('http_request_failed', 'No HTTP transport available in tests.');
     }
 }
@@ -82,6 +86,7 @@ $GLOBALS['__test_rest_responses'] = [];
 $GLOBALS['__test_rest_requests'] = [];
 $GLOBALS['__test_settings_errors'] = [];
 $GLOBALS['__test_transients'] = [];
+$GLOBALS['__test_wp_remote_requests'] = [];
 
 // The Events Calendar plugin stubs: makes that event source "active" in tests.
 if (!class_exists('Tribe__Events__Main')) {

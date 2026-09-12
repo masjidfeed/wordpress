@@ -53,6 +53,82 @@ class FirebaseClientHttpTest extends FirebaseClientTestCase {
         $client->access_token();
     }
 
+    public function test_wordpress_transport_passes_http_method_to_wp_remote_request(): void {
+        $GLOBALS['__test_wp_remote_request_response'] = [
+            'response' => ['code' => 200],
+            'headers' => ['Content-Type' => 'application/json'],
+            'body' => '{}',
+        ];
+        try {
+            $client = new Masjid_Feed_Firebase_Client($this->service_account());
+            $response = $client->wordpress_transport('POST', 'https://example.test/endpoint', ['body' => 'payload']);
+
+            $this->assertSame(200, $response['status']);
+            $sent = end($GLOBALS['__test_wp_remote_requests']);
+            $this->assertSame('POST', $sent['args']['method']);
+            $this->assertSame('https://example.test/endpoint', $sent['url']);
+            $this->assertSame('application/json', $response['headers']['content-type']);
+        } finally {
+            unset($GLOBALS['__test_wp_remote_request_response']);
+            $GLOBALS['__test_wp_remote_requests'] = [];
+        }
+    }
+
+    public function test_wordpress_transport_converts_wp_error_to_connection_failed(): void {
+        $client = new Masjid_Feed_Firebase_Client($this->service_account());
+        $this->expectException(Masjid_Feed_Firebase_Api_Connection_Failed::class);
+        $client->wordpress_transport('GET', 'https://example.test/endpoint', []);
+    }
+
+    public function test_access_token_with_fresh_flag_bypasses_cache(): void {
+        $captured = [];
+        $transport = function (string $method, string $url, array $options) use (&$captured) {
+            $captured[] = compact('method', 'url');
+            return ['status' => 200, 'headers' => [], 'body' => json_encode(['access_token' => 'tok-fresh', 'expires_in' => 3600])];
+        };
+        $client = $this->token_cached_client($transport);
+
+        $this->assertSame('tok-fresh', $client->access_token(true));
+        $this->assertCount(1, $captured);
+        $this->assertSame('POST', $captured[0]['method']);
+    }
+
+    public function test_access_token_without_fresh_flag_uses_cache(): void {
+        $captured = [];
+        $transport = function () use (&$captured) {
+            $captured[] = true;
+            return ['status' => 200, 'headers' => [], 'body' => '{}'];
+        };
+        $client = $this->token_cached_client($transport);
+
+        $this->assertSame('tok-123', $client->access_token());
+        $this->assertCount(0, $captured);
+    }
+
+    public function test_oauth_failure_carries_raw_response_details(): void {
+        $body = json_encode(['error' => 'invalid_grant', 'error_description' => 'Invalid JWT Signature.']);
+        $client = $this->new_client($this->transport(400, [], $body));
+        try {
+            $client->access_token();
+            $this->fail('Expected an exception.');
+        } catch (Masjid_Feed_Firebase_Authentication_Error $exception) {
+            $this->assertSame(400, $exception->http_status());
+            $this->assertSame($body, $exception->response_body());
+            $this->assertStringContainsString('Invalid JWT Signature', $exception->getMessage());
+        }
+    }
+
+    public function test_app_check_keys_can_be_fetched_and_counts_keys(): void {
+        $details = openssl_pkey_get_details(openssl_pkey_get_private($this->private_key_pem()));
+        $modulus = rtrim(strtr(base64_encode($details['rsa']['n']), '+/', '-_'), '=');
+        $jwks = json_encode(['keys' => [
+            ['kty' => 'RSA', 'alg' => 'RS256', 'use' => 'sig', 'n' => $modulus, 'e' => 'AQAB', 'kid' => 'kid-1'],
+        ]]);
+        $client = $this->new_client($this->transport(200, [], $jwks));
+        $keys = $client->app_check_keys(false);
+        $this->assertCount(1, $keys);
+    }
+
     public function test_send_message_uses_fcm_v1_endpoint_with_bearer_token(): void {
         $client = $this->token_cached_client(
             $this->transport(200, [], json_encode(['name' => 'projects/masjid-test/messages/abc']))

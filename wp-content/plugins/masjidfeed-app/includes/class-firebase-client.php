@@ -51,6 +51,7 @@ class Masjid_Feed_Firebase_Client {
     }
 
     public function wordpress_transport(string $method, string $url, array $options): array {
+        $options['method'] = $method;
         $response = wp_remote_request($url, $options);
         if (is_wp_error($response)) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
@@ -67,10 +68,12 @@ class Masjid_Feed_Firebase_Client {
         );
     }
 
-    public function access_token(): string {
-        $cached = ($this->cache_get)(self::TOKEN_CACHE_KEY);
-        if (is_string($cached) && '' !== $cached) {
-            return $cached;
+    public function access_token(bool $fresh = false): string {
+        if (!$fresh) {
+            $cached = ($this->cache_get)(self::TOKEN_CACHE_KEY);
+            if (is_string($cached) && '' !== $cached) {
+                return $cached;
+            }
         }
         $now = ($this->clock)();
         $assertion = JWT::encode(array(
@@ -91,12 +94,16 @@ class Masjid_Feed_Firebase_Client {
         ));
         if ($response['status'] >= 400) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- message from a remote API response; any display escapes it.
-            throw new Masjid_Feed_Firebase_Authentication_Error($this->error_message($response, 'Could not fetch a Firebase OAuth access token.'));
+            $exception = new Masjid_Feed_Firebase_Authentication_Error($this->error_message($response, 'Could not fetch a Firebase OAuth access token.'));
+            $exception->set_response_details((int) $response['status'], (string) $response['body']);
+            throw $exception;
         }
         $data = json_decode($response['body'], true);
         if (empty($data['access_token'])) {
             // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- message from a remote API response; any display escapes it.
-            throw new Masjid_Feed_Firebase_Authentication_Error($this->error_message($response, 'The OAuth token response did not contain an access token.'));
+            $exception = new Masjid_Feed_Firebase_Authentication_Error($this->error_message($response, 'The OAuth token response did not contain an access token.'));
+            $exception->set_response_details((int) $response['status'], (string) $response['body']);
+            throw $exception;
         }
         ($this->cache_set)(self::TOKEN_CACHE_KEY, (string) $data['access_token'], max(60, (int) ($data['expires_in'] ?? 3600) - 60));
         return (string) $data['access_token'];
@@ -170,13 +177,15 @@ class Masjid_Feed_Firebase_Client {
         return $payload;
     }
 
-    private function app_check_keys(bool $force_refresh): array {
+    public function app_check_keys(bool $force_refresh): array {
         $jwks_json = $force_refresh ? null : ($this->cache_get)(self::JWKS_CACHE_KEY);
         if (!is_string($jwks_json) || '' === $jwks_json) {
             $response = ($this->transport)('GET', self::APP_CHECK_JWKS_URL, array('timeout' => self::REQUEST_TIMEOUT));
             if ($response['status'] >= 400) {
                 // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- message from a remote API response; any display escapes it.
-                throw new Masjid_Feed_Firebase_Failed_Verify_App_Check_Token($this->error_message($response, 'Could not fetch the App Check public keys.'));
+                $exception = new Masjid_Feed_Firebase_Failed_Verify_App_Check_Token($this->error_message($response, 'Could not fetch the App Check public keys.'));
+                $exception->set_response_details((int) $response['status'], (string) $response['body']);
+                throw $exception;
             }
             $jwks_json = $response['body'];
             ($this->cache_set)(self::JWKS_CACHE_KEY, $jwks_json, 3600);

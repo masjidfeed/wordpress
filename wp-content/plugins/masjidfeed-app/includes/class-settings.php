@@ -311,6 +311,7 @@ class Masjid_Feed_Settings {
             } elseif ('debug' === $current_tab) {
                 $this->render_api_trace_tools();
                 $this->render_firebase_tools();
+                $this->render_validation_results();
                 $this->render_recent_deliveries();
             } else {
                 $this->render_general_tab($opts, $categories, $tags);
@@ -730,12 +731,14 @@ class Masjid_Feed_Settings {
         if (!current_user_can('manage_options')) {
             wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjidfeed-app'));
         }
-        try {
-            (new Masjid_Feed_Firebase())->validate();
-            $this->redirect_with_notice('firebase_valid', 'success');
-        } catch (Throwable $exception) {
-            $this->redirect_with_notice(rawurlencode(substr($exception->getMessage(), 0, 300)), 'error');
-        }
+        $checks = Masjid_Feed_Firebase::validate_configuration();
+        set_transient('masjidfeed_firebase_validation', $checks, 5 * MINUTE_IN_SECONDS);
+        $failed = in_array('fail', array_column($checks, 'status'), true);
+        $this->redirect_with_notice(
+            $failed ? 'firebase_validation_failed' : 'firebase_valid',
+            $failed ? 'error' : 'success',
+            'debug'
+        );
     }
 
     public function handle_test_push() {
@@ -745,7 +748,7 @@ class Masjid_Feed_Settings {
         }
         $token = sanitize_text_field(wp_unslash($_POST['fcm_token'] ?? ''));
         if ('' === $token) {
-            $this->redirect_with_notice('token_required', 'error');
+            $this->redirect_with_notice('token_required', 'error', 'debug');
         }
         try {
             (new Masjid_Feed_Firebase())->send_test($token, array(
@@ -759,9 +762,9 @@ class Masjid_Feed_Settings {
                     'deepLink' => '',
                 ),
             ));
-            $this->redirect_with_notice('test_sent', 'success');
+            $this->redirect_with_notice('test_sent', 'success', 'debug');
         } catch (Throwable $exception) {
-            $this->redirect_with_notice(rawurlencode(substr($exception->getMessage(), 0, 300)), 'error');
+            $this->redirect_with_notice(rawurlencode(substr($exception->getMessage(), 0, 300)), 'error', 'debug');
         }
     }
 
@@ -772,7 +775,7 @@ class Masjid_Feed_Settings {
         }
         $enabled = !empty($_POST['enabled']);
         Masjid_Feed_API_Trace::set_enabled($enabled);
-        $this->redirect_with_notice($enabled ? 'api_tracing_enabled' : 'api_tracing_disabled', 'success');
+        $this->redirect_with_notice($enabled ? 'api_tracing_enabled' : 'api_tracing_disabled', 'success', 'debug');
     }
 
     public function handle_clear_api_traces() {
@@ -781,7 +784,7 @@ class Masjid_Feed_Settings {
             wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjidfeed-app'));
         }
         Masjid_Feed_API_Trace::clear();
-        $this->redirect_with_notice('api_traces_cleared', 'success');
+        $this->redirect_with_notice('api_traces_cleared', 'success', 'debug');
     }
 
     private function sanitize_deep_link_template($value, $previous) {
@@ -935,6 +938,7 @@ class Masjid_Feed_Settings {
         if ($notice && wp_verify_nonce($nonce, self::VIEW_NONCE_ACTION)) {
             $messages = array(
                 'firebase_valid' => __('Firebase configuration is valid.', 'masjidfeed-app'),
+                'firebase_validation_failed' => __('Firebase configuration validation failed. See the validation results below the Firebase tools.', 'masjidfeed-app'),
                 'test_sent' => __('Test notification sent.', 'masjidfeed-app'),
                 'token_required' => __('Enter an FCM token.', 'masjidfeed-app'),
                 'api_tracing_enabled' => __('API call tracing enabled.', 'masjidfeed-app'),
@@ -952,12 +956,57 @@ class Masjid_Feed_Settings {
             <input type="hidden" name="action" value="masjidfeed_validate_firebase" /><?php wp_nonce_field('masjidfeed_validate_firebase'); ?>
             <?php submit_button(__('Validate connection', 'masjidfeed-app'), 'secondary', 'submit', false); ?>
         </form>
+        <p class="description" style="max-width:900px;"><?php esc_html_e('Runs the flow a device registration performs: decrypts the stored service-account JSON, checks the stored iOS plist and Android google-services.json configurations, fetches a fresh OAuth access token and the App Check public keys, then sends a validate-only FCM message. Raw HTTP response bodies are shown for failed steps.', 'masjidfeed-app'); ?></p>
         <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top:12px;">
             <input type="hidden" name="action" value="masjidfeed_test_push" /><?php wp_nonce_field('masjidfeed_test_push'); ?>
             <label for="masjidfeed_test_token"><strong><?php esc_html_e('Test FCM token', 'masjidfeed-app'); ?></strong></label><br />
             <input type="text" class="large-text code" id="masjidfeed_test_token" name="fcm_token" autocomplete="off" />
             <?php submit_button(__('Send test notification', 'masjidfeed-app'), 'secondary', 'submit', false); ?>
         </form>
+        <?php
+    }
+
+    private function render_validation_results() {
+        $checks = get_transient('masjidfeed_firebase_validation');
+        delete_transient('masjidfeed_firebase_validation');
+        if (!is_array($checks) || !$checks) {
+            return;
+        }
+        ?>
+        <h3><?php esc_html_e('Validation results', 'masjidfeed-app'); ?></h3>
+        <table class="widefat striped" style="max-width:900px;">
+            <thead><tr><th style="width:30%;"><?php esc_html_e('Check', 'masjidfeed-app'); ?></th><th style="width:10%;"><?php esc_html_e('Result', 'masjidfeed-app'); ?></th><th><?php esc_html_e('Details', 'masjidfeed-app'); ?></th></tr></thead>
+            <tbody>
+                <?php foreach ($checks as $check) : ?>
+                    <?php
+                    $status = (string) ($check['status'] ?? 'fail');
+                    $result_labels = array(
+                        'pass' => __('Pass', 'masjidfeed-app'),
+                        'fail' => __('Failed', 'masjidfeed-app'),
+                        'skipped' => __('Skipped', 'masjidfeed-app'),
+                    );
+                    $colors = array('pass' => '#00a32a', 'fail' => '#d63638', 'skipped' => '#8c8f94');
+                    $result_label = (string) ($result_labels[$status] ?? __('Failed', 'masjidfeed-app'));
+                    $result_color = (string) ($colors[$status] ?? '#d63638');
+                    $detail = (string) ($check['detail'] ?? '');
+                    $response = (string) ($check['response'] ?? '');
+                    ?>
+                    <tr>
+                        <td><?php echo esc_html((string) ($check['label'] ?? '')); ?></td>
+                        <td><strong style="color:<?php echo esc_attr($result_color); ?>;"><?php echo esc_html($result_label); ?></strong></td>
+                        <td>
+                            <?php echo esc_html($detail); ?>
+                            <?php if ('' !== $response) : ?>
+                                <details style="margin-top:6px;">
+                                    <summary><?php esc_html_e('HTTP response body', 'masjidfeed-app'); ?></summary>
+                                    <pre style="max-width:640px;overflow:auto;white-space:pre-wrap;"><?php echo esc_html($response); ?></pre>
+                                </details>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
         <?php
     }
 
@@ -1042,11 +1091,19 @@ class Masjid_Feed_Settings {
         <?php endif;
     }
 
-    private function redirect_with_notice($notice, $type) {
-        wp_safe_redirect(wp_nonce_url(
-            add_query_arg(array('page' => self::PAGE_SLUG, 'masjidfeed_notice' => $notice, 'masjidfeed_notice_type' => $type), admin_url('options-general.php')),
-            self::VIEW_NONCE_ACTION
-        ));
+    private function redirect_with_notice($notice, $type, $tab = '') {
+        $args = array(
+            'page' => self::PAGE_SLUG,
+            'masjidfeed_notice' => $notice,
+            'masjidfeed_notice_type' => $type,
+        );
+        $tab = sanitize_key((string) $tab);
+        if ('' !== $tab) {
+            $args['tab'] = $tab;
+        }
+        $url = add_query_arg($args, admin_url('options-general.php'));
+        // wp_nonce_url() HTML-escapes its output; a redirect Location header must not be HTML-escaped.
+        wp_safe_redirect(add_query_arg('_wpnonce', wp_create_nonce(self::VIEW_NONCE_ACTION), $url));
         exit;
     }
 }
