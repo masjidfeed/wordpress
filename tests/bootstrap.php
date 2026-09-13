@@ -241,6 +241,12 @@ if (!function_exists('home_url')) {
     }
 }
 
+if (!function_exists('untrailingslashit')) {
+    function untrailingslashit($value) {
+        return rtrim((string) $value, '/ ');
+    }
+}
+
 if (!function_exists('get_post')) {
     function get_post($post_id) {
         return $GLOBALS['__test_posts'][(int) $post_id] ?? null;

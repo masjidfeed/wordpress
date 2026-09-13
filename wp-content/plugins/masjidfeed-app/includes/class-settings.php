@@ -25,6 +25,9 @@ class Masjid_Feed_Settings {
         add_action('admin_post_masjidfeed_test_push', array($this, 'handle_test_push'));
         add_action('admin_post_masjidfeed_toggle_api_tracing', array($this, 'handle_toggle_api_tracing'));
         add_action('admin_post_masjidfeed_clear_api_traces', array($this, 'handle_clear_api_traces'));
+        // Late priority so it still fires on the current init run: this class
+        // is constructed from the plugin's own init callback.
+        add_action('init', array($this, 'sync_masjid_id'), 20);
     }
 
     /**
@@ -52,7 +55,7 @@ class Masjid_Feed_Settings {
      */
     public static function get_defaults() {
         return array(
-            'masjid_id' => sanitize_title(get_bloginfo('name')),
+            'masjid_id' => self::generate_masjid_id(),
             'masjid_name' => get_bloginfo('name'),
             'timezone' => wp_timezone_string(),
             'logo_id' => 0,
@@ -87,6 +90,34 @@ class Masjid_Feed_Settings {
             'firebase_ios_config' => array(),
             'firebase_android_config' => array(),
         );
+    }
+
+    /**
+     * Derive the Masjid ID from the site URL: the first 8 characters of the
+     * SHA-256 hash of the site URL, prefixed with "masjid-". Not editable.
+     */
+    public static function generate_masjid_id() {
+        return 'masjid-' . substr(hash('sha256', untrailingslashit(home_url())), 0, 8);
+    }
+
+    /**
+     * Keep the stored Masjid ID aligned with the URL-derived value, but only
+     * when the stored value does not follow the expected "masjid-xxxxxxxx"
+     * pattern (e.g. values saved by earlier plugin versions). Values that
+     * already match the pattern are left untouched, even if they no longer
+     * match this site's URL.
+     */
+    public function sync_masjid_id() {
+        $settings = get_option(MASJIDFEED_OPTION_KEY, null);
+        if (!is_array($settings)) {
+            return;
+        }
+        $stored = (string) ($settings['masjid_id'] ?? '');
+        if (preg_match('/^masjid-[0-9a-f]{8}$/', $stored)) {
+            return;
+        }
+        $settings['masjid_id'] = self::generate_masjid_id();
+        update_option(MASJIDFEED_OPTION_KEY, $settings);
     }
 
     public function add_settings_page() {
@@ -197,7 +228,7 @@ class Masjid_Feed_Settings {
     private function sanitize_general_settings($input, $existing) {
         $out = $existing;
 
-        $out['masjid_id'] = sanitize_title($input['masjid_id'] ?? '');
+        $out['masjid_id'] = self::generate_masjid_id();
         $out['masjid_name'] = sanitize_text_field($input['masjid_name'] ?? '');
         $out['timezone'] = sanitize_text_field($input['timezone'] ?? '');
         $out['logo_id'] = absint($input['logo_id'] ?? 0);
@@ -333,8 +364,11 @@ class Masjid_Feed_Settings {
             <h2><?php esc_html_e('Masjid', 'masjidfeed-app'); ?></h2>
             <table class="form-table" role="presentation">
                 <tr>
-                    <th scope="row"><label for="masjidfeed_masjid_id"><?php esc_html_e('Masjid ID', 'masjidfeed-app'); ?></label></th>
-                    <td><input type="text" id="masjidfeed_masjid_id" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[masjid_id]" value="<?php echo esc_attr($opts['masjid_id']); ?>" class="regular-text" /></td>
+                    <th scope="row"><?php esc_html_e('Masjid ID', 'masjidfeed-app'); ?></th>
+                    <td>
+                        <code id="masjidfeed_masjid_id"><?php echo esc_html($opts['masjid_id']); ?></code>
+                        <p class="description"><?php esc_html_e('Generated automatically from the site URL and cannot be changed.', 'masjidfeed-app'); ?></p>
+                    </td>
                 </tr>
                 <tr>
                     <th scope="row"><label for="masjidfeed_masjid_name"><?php esc_html_e('Masjid Name', 'masjidfeed-app'); ?></label></th>
