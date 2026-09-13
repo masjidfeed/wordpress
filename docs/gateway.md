@@ -37,7 +37,7 @@ instead.
       └───────────────────────────▶│   hosted)    │  service account
                                    └──────▲───────┘
 ┌────────────────-┐  3. POST send    │
-│ WordPress site  │─────────────────┘
+│ WordPress site  │───────────-──────┘
 │ (MasjidFeed App │     (site_id + secret)
 │    plugin)      │   keeps: settings, events, announcements,
 └─────────────-───┘   queue table, retry/cron logic
@@ -48,16 +48,9 @@ instead.
 1. Org installs the plugin; the plugin exposes a verification resource at
    `masjid/v1/gateway-verification` containing a challenge value from the
    signup form.
-2. Operator dashboard fetches that URL, verifies the challenge, issues a
-   `site_id` + `gateway_secret` (shown once, stored in the plugin encrypted via
-   `Masjid_Feed_Credential_Store`, which already exists).
-3. Admin pastes credentials into the Push tab; this replaces the
-   service-account/plist/JSON uploads. The central project's plist/JSON values
-   ship in the plugin (public config only — apiKey/appId/senderId), so the
-   per-tenant "Firebase project" settings fields are removed entirely.
-4. The gateway also generates a per-site **topic secret** (random 128-bit
-   string) and stores only `site_id → url, secret_hash, topic_secret` —
-   per-*org* state, never per-device.
+2. Admin selects whether to use MasjidFeed push notifications or custom Firebase settings.
+3. When MasjidFeed push notifications are enabled, the plugin calls the gateway to register; the gateway calls back the site URL to verify domain ownership and issues a `gateway_secret`; the secret is stored encrypted in the plugin.
+4. The gateway stores the `gateway_secret_hash` along with a generated a per-site **topic secret**: `site_id → url, gateway_secret_hash, topic_secret` — per-*org* state, never per-device.
 
 ## 2. Topic key issuance (app → gateway)
 
@@ -88,7 +81,7 @@ only client-side subscribe path.
 - Gateway actions: authenticate → rate limit (per-site token bucket + daily
   quota) → validate payload schema (title/body lengths, `deepLink` must match
   the site's registered template scheme) → check `notification_id` idempotency
-  (recent-IDs cache per site) → publish to `/topics/tenant_<site_id>_<...>` →
+  (recent-IDs cache per site) → publish to `/topics/tenant_<site_id>_<version>_<topic_secret>` →
   return the FCM message name.
 - The plugin keeps its existing queue, dedupe, retry/backoff, and admin UI
   untouched; only the send call and the "Validate connection" debug tool change
@@ -105,12 +98,13 @@ previous version for a grace window.
 Per-tenant state only — **no per-device state**:
 
 ```
-sites        (site_id, url, status, secret_hash, topic_secret, quotas, created_at)
+sites        (site_id, url, status, gateway_secret_hash, topic_secret, quotas, created_at)
 audit_log    (actor, action, site_id, at)
 ```
 
-Plus a short-lived idempotency cache (notification IDs) — in-memory or TTL
-store, not a durable table.
+`sites` (site_id, url, status, gateway_secret_hash, topic_secret, quotas, created_at) are stored in Firestore or Cosmos DB (or blob storage) and loaded into memory on service startup. In the future, cache can be moved to Redis. Change feed is used to keep the in-memory cache in sync with the persistent storage. Change feed is polled every 5-10 minutes to reduce cost.
+
+`audit_log` is stored in Firestore or Cosmos DB and contains only site-registration-related actions.
 
 ## 5. Threat-model check
 

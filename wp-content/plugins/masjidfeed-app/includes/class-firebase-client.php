@@ -134,7 +134,8 @@ class Masjid_Feed_Firebase_Client {
         $response = $this->authorized_request(
             'POST',
             self::IID_URL . $path,
-            array('to' => '/topics/' . $topic, 'registration_tokens' => array($registration_token))
+            array('to' => '/topics/' . $topic, 'registration_tokens' => array($registration_token)),
+            array('access_token_auth' => 'true')
         );
         $data = $this->decode_json($response);
         $results = array();
@@ -212,14 +213,14 @@ class Masjid_Feed_Firebase_Client {
         return '' !== $kid && array_key_exists($kid, $keys);
     }
 
-    private function authorized_request(string $method, string $url, array $json_body): array {
+    private function authorized_request(string $method, string $url, array $json_body, array $extra_headers = array()): array {
         return ($this->transport)($method, $url, array(
             'timeout' => self::REQUEST_TIMEOUT,
             'headers' => array(
                 'Authorization' => 'Bearer ' . $this->access_token(),
                 'Content-Type' => 'application/json; charset=UTF-8',
                 'Accept' => 'application/json, text/plain;q=0.9',
-            ),
+            ) + $extra_headers,
             'body' => json_encode($json_body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ));
     }
