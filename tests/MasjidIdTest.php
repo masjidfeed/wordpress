@@ -20,8 +20,8 @@ class MasjidIdTest extends TestCase {
         $this->assertMatchesRegularExpression('/^masjid-[0-9a-f]{8}$/', Masjid_Feed_Settings::generate_masjid_id());
     }
 
-    public function test_generate_masjid_id_is_deterministic_from_site_url(): void {
-        $expected = 'masjid-' . substr(hash('sha256', 'https://example.test'), 0, 8);
+    public function test_generate_masjid_id_is_deterministic_from_site_domain(): void {
+        $expected = 'masjid-' . substr(hash('sha256', 'example.test'), 0, 8);
         $this->assertSame($expected, Masjid_Feed_Settings::generate_masjid_id());
     }
 

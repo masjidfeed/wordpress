@@ -93,11 +93,17 @@ class Masjid_Feed_Settings {
     }
 
     /**
-     * Derive the Masjid ID from the site URL: the first 8 characters of the
-     * SHA-256 hash of the site URL, prefixed with "masjid-". Not editable.
+     * Derive the Masjid ID from the site domain: the first 8 characters of
+     * the SHA-256 hash of the lowercased host name (scheme and path are
+     * ignored), prefixed with "masjid-". Not editable.
      */
     public static function generate_masjid_id() {
-        return 'masjid-' . substr(hash('sha256', untrailingslashit(home_url())), 0, 8);
+        $host = parse_url(home_url(), PHP_URL_HOST);
+        if (!is_string($host) || '' === $host) {
+            $host = (string) home_url();
+        }
+        $host = strtolower(rtrim($host, '/'));
+        return 'masjid-' . substr(hash('sha256', $host), 0, 8);
     }
 
     /**
