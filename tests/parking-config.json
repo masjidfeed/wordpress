@@ -1,0 +1,609 @@
+{
+  "center": {
+    "latitude": 47.7779,
+    "longitude": -122.1906
+  },
+  "nearRadiusMeters": 800,
+  "zones": [
+    {
+      "id": "north-lot",
+      "name": "North lot",
+      "type": "no-parking",
+      "message": "Please move to a permitted parking area.",
+      "coordinates": [
+        {
+          "latitude": 47.77882298016584,
+          "longitude": -122.19132629326828
+        },
+        {
+          "latitude": 47.77882298016584,
+          "longitude": -122.18952387645021
+        },
+        {
+          "latitude": 47.77809991713082,
+          "longitude": -122.18952387645021
+        },
+        {
+          "latitude": 47.77809991713082,
+          "longitude": -122.19132629326828
+        }
+      ]
+    },
+    {
+      "id": "north-strip",
+      "name": "North strip",
+      "type": "no-parking",
+      "message": "Please move to a permitted parking area.",
+      "coordinates": [
+        {
+          "latitude": 47.77900445058262,
+          "longitude": -122.19157280621316
+        },
+        {
+          "latitude": 47.77900445058262,
+          "longitude": -122.18965174019607
+        },
+        {
+          "latitude": 47.778847018514,
+          "longitude": -122.18965174019607
+        },
+        {
+          "latitude": 47.778847018514,
+          "longitude": -122.19157280621316
+        }
+      ]
+    },
+    {
+      "id": "icob-main-lot",
+      "name": "ICOB main lot",
+      "type": "allowed",
+      "message": "Parking is allowed here.",
+      "coordinates": [
+        {
+          "latitude": 47.77803723877068,
+          "longitude": -122.1911043
+        },
+        {
+          "latitude": 47.7780463,
+          "longitude": -122.1907717
+        },
+        {
+          "latitude": 47.7778668,
+          "longitude": -122.1907614
+        },
+        {
+          "latitude": 47.7777342,
+          "longitude": -122.1907655
+        },
+        {
+          "latitude": 47.777639,
+          "longitude": -122.190936
+        },
+        {
+          "latitude": 47.7776473,
+          "longitude": -122.1911168
+        }
+      ]
+    },
+    {
+      "id": "west-strip",
+      "name": "West strip",
+      "type": "no-parking",
+      "message": "Please move to a permitted parking area.",
+      "coordinates": [
+        {
+          "latitude": 47.77808883999606,
+          "longitude": -122.19140598274939
+        },
+        {
+          "latitude": 47.77808883999606,
+          "longitude": -122.1911646519878
+        },
+        {
+          "latitude": 47.77779397516241,
+          "longitude": -122.1911646519878
+        },
+        {
+          "latitude": 47.77779397516241,
+          "longitude": -122.19140598274939
+        }
+      ]
+    },
+    {
+      "id": "east-drive",
+      "name": "East drive",
+      "type": "allowed",
+      "message": "Parking is allowed here.",
+      "coordinates": [
+        {
+          "latitude": 47.7777022,
+          "longitude": -122.1902121
+        },
+        {
+          "latitude": 47.777631,
+          "longitude": -122.1900398
+        },
+        {
+          "latitude": 47.7779501,
+          "longitude": -122.1897748
+        },
+        {
+          "latitude": 47.7780347,
+          "longitude": -122.1899504
+        },
+        {
+          "latitude": 47.7779662,
+          "longitude": -122.190067
+        },
+        {
+          "latitude": 47.777853,
+          "longitude": -122.1901348
+        }
+      ]
+    },
+    {
+      "id": "south-curb",
+      "name": "South curb",
+      "type": "no-parking",
+      "message": "Please move to a permitted parking area.",
+      "coordinates": [
+        {
+          "latitude": 47.777697,
+          "longitude": -122.1907717
+        },
+        {
+          "latitude": 47.7776486,
+          "longitude": -122.1907737
+        },
+        {
+          "latitude": 47.7776447,
+          "longitude": -122.1902569
+        },
+        {
+          "latitude": 47.7776887,
+          "longitude": -122.1902498
+        },
+        {
+          "latitude": 47.7776942,
+          "longitude": -122.1904121
+        }
+      ]
+    },
+    {
+      "id": "south-drive",
+      "name": "South drive",
+      "type": "allowed",
+      "message": "Parking is allowed here.",
+      "coordinates": [
+        {
+          "latitude": 47.7770278,
+          "longitude": -122.1909022
+        },
+        {
+          "latitude": 47.7772732,
+          "longitude": -122.1906886
+        },
+        {
+          "latitude": 47.7775352,
+          "longitude": -122.190461
+        },
+        {
+          "latitude": 47.7775959,
+          "longitude": -122.1901247
+        },
+        {
+          "latitude": 47.7775363,
+          "longitude": -122.1900979
+        },
+        {
+          "latitude": 47.7774419,
+          "longitude": -122.1901381
+        },
+        {
+          "latitude": 47.7774398,
+          "longitude": -122.1901581
+        },
+        {
+          "latitude": 47.7774284,
+          "longitude": -122.1901967
+        },
+        {
+          "latitude": 47.7774239,
+          "longitude": -122.1902569
+        },
+        {
+          "latitude": 47.7773609,
+          "longitude": -122.1903372
+        },
+        {
+          "latitude": 47.7771855,
+          "longitude": -122.190461
+        },
+        {
+          "latitude": 47.7769595,
+          "longitude": -122.1906618
+        },
+        {
+          "latitude": 47.7766869,
+          "longitude": -122.1905344
+        },
+        {
+          "latitude": 47.7765986,
+          "longitude": -122.1905015
+        },
+        {
+          "latitude": 47.7765392,
+          "longitude": -122.190483
+        },
+        {
+          "latitude": 47.776513,
+          "longitude": -122.1902406
+        },
+        {
+          "latitude": 47.7764039,
+          "longitude": -122.1902468
+        },
+        {
+          "latitude": 47.7764205,
+          "longitude": -122.1904502
+        },
+        {
+          "latitude": 47.7764378,
+          "longitude": -122.1906791
+        },
+        {
+          "latitude": 47.7766619,
+          "longitude": -122.1907824
+        },
+        {
+          "latitude": 47.7766991,
+          "longitude": -122.1906153
+        },
+        {
+          "latitude": 47.776807,
+          "longitude": -122.1906741
+        },
+        {
+          "latitude": 47.7769653,
+          "longitude": -122.1907429
+        },
+        {
+          "latitude": 47.7770029,
+          "longitude": -122.1908314
+        }
+      ]
+    },
+    {
+      "id": "south-drive-jumuah",
+      "name": "South drive (Jumu’ah restricted)",
+      "type": "event-restricted",
+      "message": "Parking here is not available during Jumu’ah.",
+      "coordinates": [
+        {
+          "latitude": 47.7774023,
+          "longitude": -122.1902298
+        },
+        {
+          "latitude": 47.7773663,
+          "longitude": -122.1901661
+        },
+        {
+          "latitude": 47.7772119,
+          "longitude": -122.1903094
+        },
+        {
+          "latitude": 47.7769522,
+          "longitude": -122.1905102
+        },
+        {
+          "latitude": 47.7765972,
+          "longitude": -122.1903762
+        },
+        {
+          "latitude": 47.7766027,
+          "longitude": -122.190481
+        },
+        {
+          "latitude": 47.7769451,
+          "longitude": -122.1906207
+        },
+        {
+          "latitude": 47.7769801,
+          "longitude": -122.1906002
+        },
+        {
+          "latitude": 47.7770483,
+          "longitude": -122.1905293
+        },
+        {
+          "latitude": 47.7771592,
+          "longitude": -122.1904375
+        },
+        {
+          "latitude": 47.7773024,
+          "longitude": -122.1903355
+        }
+      ]
+    },
+    {
+      "id": "northeast-business-lot",
+      "name": "Northeast business lot",
+      "type": "no-parking",
+      "message": "Please move to a permitted parking area.",
+      "coordinates": [
+        {
+          "latitude": 47.778816638944505,
+          "longitude": -122.18950724774444
+        },
+        {
+          "latitude": 47.778816638944505,
+          "longitude": -122.18897084135922
+        },
+        {
+          "latitude": 47.77825372247315,
+          "longitude": -122.18897084135922
+        },
+        {
+          "latitude": 47.77825372247315,
+          "longitude": -122.18950724774444
+        }
+      ]
+    },
+    {
+      "id": "southeast-lot",
+      "name": "Southeast lot",
+      "type": "allowed",
+      "message": "Parking is allowed here.",
+      "coordinates": [
+        {
+          "latitude": 47.7778656,
+          "longitude": -122.1896596
+        },
+        {
+          "latitude": 47.7778396,
+          "longitude": -122.1895885
+        },
+        {
+          "latitude": 47.7776562,
+          "longitude": -122.1897142
+        },
+        {
+          "latitude": 47.7776567,
+          "longitude": -122.1896897
+        },
+        {
+          "latitude": 47.7776886,
+          "longitude": -122.1895125
+        },
+        {
+          "latitude": 47.7776286,
+          "longitude": -122.1894991
+        },
+        {
+          "latitude": 47.7776349,
+          "longitude": -122.1894437
+        },
+        {
+          "latitude": 47.7773716,
+          "longitude": -122.1893416
+        },
+        {
+          "latitude": 47.7773624,
+          "longitude": -122.1894039
+        },
+        {
+          "latitude": 47.7775263,
+          "longitude": -122.189476
+        },
+        {
+          "latitude": 47.7775116,
+          "longitude": -122.1895497
+        },
+        {
+          "latitude": 47.7774691,
+          "longitude": -122.189874
+        },
+        {
+          "latitude": 47.7775063,
+          "longitude": -122.189885
+        },
+        {
+          "latitude": 47.7775292,
+          "longitude": -122.1898597
+        },
+        {
+          "latitude": 47.7775876,
+          "longitude": -122.1897909
+        },
+        {
+          "latitude": 47.7776365,
+          "longitude": -122.1898012
+        },
+        {
+          "latitude": 47.777686,
+          "longitude": -122.1898091
+        }
+      ]
+    },
+    {
+      "id": "southeast-drive",
+      "name": "Southeast drive",
+      "type": "no-parking",
+      "message": "Please move to a permitted parking area.",
+      "coordinates": [
+        {
+          "latitude": 47.7773615,
+          "longitude": -122.1894773
+        },
+        {
+          "latitude": 47.7773097,
+          "longitude": -122.1894474
+        },
+        {
+          "latitude": 47.777262,
+          "longitude": -122.189746
+        },
+        {
+          "latitude": 47.7772185,
+          "longitude": -122.1900982
+        },
+        {
+          "latitude": 47.7769373,
+          "longitude": -122.190326
+        },
+        {
+          "latitude": 47.7766309,
+          "longitude": -122.1901876
+        },
+        {
+          "latitude": 47.7766082,
+          "longitude": -122.190292
+        },
+        {
+          "latitude": 47.7769603,
+          "longitude": -122.1904317
+        },
+        {
+          "latitude": 47.7771964,
+          "longitude": -122.1902344
+        },
+        {
+          "latitude": 47.7772557,
+          "longitude": -122.1901769
+        },
+        {
+          "latitude": 47.7772792,
+          "longitude": -122.1900865
+        },
+        {
+          "latitude": 47.7773197,
+          "longitude": -122.1897622
+        }
+      ]
+    },
+    {
+      "id": "east-business-lot",
+      "name": "East business lot",
+      "type": "no-parking",
+      "message": "Please move to a permitted parking area.",
+      "coordinates": [
+        {
+          "latitude": 47.7780527,
+          "longitude": -122.1891928
+        },
+        {
+          "latitude": 47.7780763,
+          "longitude": -122.1890172
+        },
+        {
+          "latitude": 47.7779411,
+          "longitude": -122.1889738
+        },
+        {
+          "latitude": 47.7780736,
+          "longitude": -122.1883144
+        },
+        {
+          "latitude": 47.7782046,
+          "longitude": -122.1883691
+        },
+        {
+          "latitude": 47.7782866,
+          "longitude": -122.1880556
+        },
+        {
+          "latitude": 47.7780431,
+          "longitude": -122.1879619
+        },
+        {
+          "latitude": 47.7774385,
+          "longitude": -122.1876851
+        },
+        {
+          "latitude": 47.7771627,
+          "longitude": -122.1892028
+        },
+        {
+          "latitude": 47.7774166,
+          "longitude": -122.1893135
+        },
+        {
+          "latitude": 47.7778958,
+          "longitude": -122.1894609
+        },
+        {
+          "latitude": 47.777911,
+          "longitude": -122.1891425
+        }
+      ]
+    },
+    {
+      "id": "south-service-area",
+      "name": "Service vehicles area",
+      "type": "no-parking",
+      "message": "Please move to a permitted parking area.",
+      "coordinates": [
+        {
+          "latitude": 47.7769253,
+          "longitude": -122.1909279
+        },
+        {
+          "latitude": 47.7769534,
+          "longitude": -122.1908179
+        },
+        {
+          "latitude": 47.7766947,
+          "longitude": -122.1906956
+        },
+        {
+          "latitude": 47.7766702,
+          "longitude": -122.1907911
+        },
+        {
+          "latitude": 47.7768994,
+          "longitude": -122.190908
+        }
+      ]
+    },
+    {
+      "id": "northwest-strip",
+      "name": "Northwest strip",
+      "type": "no-parking",
+      "message": "Please move to a permitted parking area.",
+      "coordinates": [
+        {
+          "latitude": 47.7781732,
+          "longitude": -122.1915906
+        },
+        {
+          "latitude": 47.7786807,
+          "longitude": -122.1918377
+        },
+        {
+          "latitude": 47.778708,
+          "longitude": -122.1916343
+        },
+        {
+          "latitude": 47.7782141,
+          "longitude": -122.1914206
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "id": "jummah",
+      "name": "Friday Prayer",
+      "message": "Strict parking rules are in effect for Friday prayer.",
+      "schedule": {
+        "type": "weekly",
+        "days": [
+          5
+        ],
+        "start": "11:30",
+        "end": "15:30"
+      },
+      "zoneIds": "all"
+    }
+  ]
+}

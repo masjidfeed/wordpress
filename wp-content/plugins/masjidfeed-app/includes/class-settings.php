@@ -14,6 +14,8 @@ class Masjid_Feed_Settings {
 
     const GENERAL_OPTION_GROUP = 'masjidfeed_general_group';
     const PUSH_OPTION_GROUP = 'masjidfeed_push_group';
+    const PARKING_OPTION_GROUP = 'masjidfeed_parking_group';
+    const PARKING_SCRIPT_URL = 'https://github.com/masjidfeed/wordpress/blob/main/parking-api/parking-geojson-to-config.py';
     const PAGE_SLUG = 'masjidfeed-app-settings';
     const VIEW_NONCE_ACTION = 'masjidfeed_settings_view';
 
@@ -144,6 +146,11 @@ class Masjid_Feed_Settings {
         );
         register_setting(self::GENERAL_OPTION_GROUP, MASJIDFEED_OPTION_KEY, $args);
         register_setting(self::PUSH_OPTION_GROUP, MASJIDFEED_OPTION_KEY, $args);
+        register_setting(self::PARKING_OPTION_GROUP, Masjid_Feed_Parking_Config::OPTION_KEY, array(
+            'type' => 'string',
+            'sanitize_callback' => array($this, 'sanitize_parking_config'),
+            'default' => '',
+        ));
     }
 
     public function enqueue_media_scripts($hook) {
@@ -314,7 +321,7 @@ class Masjid_Feed_Settings {
 
         $nonce = isset($_GET['_wpnonce']) ? sanitize_text_field(wp_unslash($_GET['_wpnonce'])) : '';
         $current_tab = isset($_GET['tab']) ? sanitize_key(wp_unslash($_GET['tab'])) : 'general';
-        if (!in_array($current_tab, array('general', 'push', 'debug'), true)
+        if (!in_array($current_tab, array('general', 'push', 'parking', 'debug'), true)
             || !wp_verify_nonce($nonce, self::VIEW_NONCE_ACTION)) {
             $current_tab = 'general';
         }
@@ -331,6 +338,7 @@ class Masjid_Feed_Settings {
                 $tabs = array(
                     'general' => __('General', 'masjidfeed-app'),
                     'push' => __('Push', 'masjidfeed-app'),
+                    'parking' => __('Parking', 'masjidfeed-app'),
                     'debug' => __('Debug', 'masjidfeed-app'),
                 );
                 foreach ($tabs as $tab => $label) :
@@ -345,6 +353,8 @@ class Masjid_Feed_Settings {
             <?php
             if ('push' === $current_tab) {
                 $this->render_push_tab($opts, $tags);
+            } elseif ('parking' === $current_tab) {
+                $this->render_parking_tab();
             } elseif ('debug' === $current_tab) {
                 $this->render_api_trace_tools();
                 $this->render_firebase_tools();
@@ -692,6 +702,79 @@ class Masjid_Feed_Settings {
     }
 
     /**
+     * Parking map configuration tab. Holds the finished JSON document produced
+     * by the parking-geojson-to-config.py script (see parking-api/README.md).
+     */
+    private function render_parking_tab() {
+        $raw = get_option(Masjid_Feed_Parking_Config::OPTION_KEY, '');
+        $document = is_string($raw) && '' !== trim($raw) ? json_decode($raw, true) : null;
+        ?>
+        <form method="post" action="options.php">
+            <?php settings_fields(self::PARKING_OPTION_GROUP); ?>
+
+            <h2 id="parking-config"><?php esc_html_e('Parking Map', 'masjidfeed-app'); ?></h2>
+            <p class="description">
+                <?php esc_html_e('Serves the parking map zones and restriction schedules consumed by the mobile app at GET /wp-json/masjid/v1/parking-config.', 'masjidfeed-app'); ?>
+                <?php esc_html_e('Saving a change takes effect within a few minutes; phones pick it up the next time the app is started.', 'masjidfeed-app'); ?>
+            </p>
+            <p class="description">
+                <?php esc_html_e('The app trusts any 200 response, so always paste the checked output of the converter script rather than editing this JSON by hand:', 'masjidfeed-app'); ?>
+            </p>
+            <ol style="max-width:900px;">
+                <li>
+                    <?php esc_html_e('Download what is live, so the endpoint stays the master copy:', 'masjidfeed-app'); ?>
+                    <pre><code>curl -s -A 'ICOB-admin/1.0' '<?php echo esc_url(rest_url('masjid/v1/parking-config')); ?>' &gt; current.json</code></pre>
+                </li>
+                <li>
+                    <?php esc_html_e('Turn it into GeoJSON and edit the zones in', 'masjidfeed-app'); ?>
+                    <a href="https://geojson.io" target="_blank" rel="noopener">geojson.io</a>
+                    <?php esc_html_e('(edit schedules directly in current.json instead):', 'masjidfeed-app'); ?>
+                    <pre><code>python3 parking-geojson-to-config.py --to-geojson current.json &gt; zones.geojson</code></pre>
+                </li>
+                <li>
+                    <?php esc_html_e('Build the new payload and repeat until it prints OK:', 'masjidfeed-app'); ?>
+                    <pre><code>python3 parking-geojson-to-config.py zones.geojson current.json &gt; parking-config.json</code></pre>
+                </li>
+                <li><?php esc_html_e('Paste the contents of parking-config.json below and save.', 'masjidfeed-app'); ?></li>
+            </ol>
+            <p class="description">
+                <?php
+                printf(
+                    /* translators: %s: URL of the converter script */
+                    esc_html__('Download the converter script (parking-geojson-to-config.py, needs Python 3.8+) from %s. Saving invalid JSON is refused and the previous document keeps being served.', 'masjidfeed-app'),
+                    '<a href="' . esc_url(self::PARKING_SCRIPT_URL) . '" target="_blank" rel="noopener">' . esc_html(self::PARKING_SCRIPT_URL) . '</a>'
+                );
+                ?>
+            </p>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><?php esc_html_e('Status', 'masjidfeed-app'); ?></th>
+                    <td>
+                        <?php if (is_array($document)) : ?>
+                            <p><strong><?php esc_html_e('Configured.', 'masjidfeed-app'); ?></strong>
+                            <?php echo esc_html(Masjid_Feed_Parking_Config::summarize($document)); ?></p>
+                            <p class="description"><?php esc_html_e('Saving invalid JSON is refused and the previous document keeps being served.', 'masjidfeed-app'); ?></p>
+                        <?php else : ?>
+                            <p><strong><?php esc_html_e('Not configured.', 'masjidfeed-app'); ?></strong>
+                            <?php esc_html_e('The endpoint returns 404 and the app keeps using its built-in parking data.', 'masjidfeed-app'); ?></p>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="masjidfeed_parking_config"><?php esc_html_e('Configuration JSON', 'masjidfeed-app'); ?></label></th>
+                    <td>
+                        <textarea id="masjidfeed_parking_config" name="<?php echo esc_attr(Masjid_Feed_Parking_Config::OPTION_KEY); ?>" class="large-text code" rows="24" spellcheck="false"><?php echo esc_html(is_string($raw) ? $raw : ''); ?></textarea>
+                        <p class="description"><?php esc_html_e('Paste the full document, from the opening brace to the closing brace.', 'masjidfeed-app'); ?></p>
+                    </td>
+                </tr>
+            </table>
+
+            <?php submit_button(); ?>
+        </form>
+        <?php
+    }
+
+    /**
      * Effective events source: the stored key only while that plugin is
      * available. Falls back to empty ("None") otherwise, e.g. when no events
      * plugin is installed or the configured plugin was deactivated.
@@ -825,6 +908,42 @@ class Masjid_Feed_Settings {
         }
         Masjid_Feed_API_Trace::clear();
         $this->redirect_with_notice('api_traces_cleared', 'success', 'debug');
+    }
+
+    /**
+     * Sanitize the parking configuration JSON. The mobile app trusts any 200
+     * response from /parking-config, so an invalid document is refused and
+     * the previous document stays in place.
+     */
+    public function sanitize_parking_config($value) {
+        $raw = is_string($value) ? trim($value) : '';
+        $previous = get_option(Masjid_Feed_Parking_Config::OPTION_KEY, '');
+        $previous = is_string($previous) ? $previous : '';
+
+        if ('' === $raw) {
+            return $previous;
+        }
+
+        $result = Masjid_Feed_Parking_Config::parse($raw);
+        if ($result['errors']) {
+            foreach (array_slice($result['errors'], 0, 10) as $index => $message) {
+                add_settings_error(
+                    Masjid_Feed_Parking_Config::OPTION_KEY,
+                    'invalid_parking_config_' . $index,
+                    $message
+                );
+            }
+            if (count($result['errors']) > 10) {
+                add_settings_error(
+                    Masjid_Feed_Parking_Config::OPTION_KEY,
+                    'invalid_parking_config_more',
+                    sprintf(__('... and %d more problem(s).', 'masjidfeed-app'), count($result['errors']) - 10)
+                );
+            }
+            return $previous;
+        }
+
+        return $raw;
     }
 
     private function sanitize_deep_link_template($value, $previous) {

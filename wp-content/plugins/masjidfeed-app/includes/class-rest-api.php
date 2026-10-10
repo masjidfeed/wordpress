@@ -8,6 +8,7 @@
  *  - GET /events         Upcoming events
  *  - GET /announcements  Announcements (regular WordPress posts)
  *  - GET /posts/{id}     A published post with optional event fields
+ *  - GET /parking-config Parking map zones and event schedules
  */
 
 if (!defined('ABSPATH')) { exit; }
@@ -19,7 +20,7 @@ class Masjid_Feed_REST_API {
     const MAX_LIMIT = 100;
     const CLIENT_CACHE_TTL = 60;
     const SERVER_CACHE_TTL = DAY_IN_SECONDS;
-    const CONFIG_CACHE_KEY = 'masjidfeed_config_response_v6';
+    const CONFIG_CACHE_KEY = 'masjidfeed_config_response_v7';
     const CONFIG_SHARED_CACHE_TTL = HOUR_IN_SECONDS;
     const EVENTS_CACHE_KEY = 'masjidfeed_events_response_v9';
     const EVENTS_SHARED_CACHE_TTL = 5 * MINUTE_IN_SECONDS;
@@ -28,6 +29,8 @@ class Masjid_Feed_REST_API {
     const REGULAR_ANNOUNCEMENTS_CACHE_KEY = 'masjidfeed_announcements_response_v8_regular';
     const ANNOUNCEMENTS_SHARED_CACHE_TTL = 10 * MINUTE_IN_SECONDS;
     const POST_SHARED_CACHE_TTL = HOUR_IN_SECONDS;
+    const PARKING_CACHE_KEY = 'masjidfeed_parking_config_response_v1';
+    const PARKING_SHARED_CACHE_TTL = HOUR_IN_SECONDS;
 
     private $authorized_firebase;
 
@@ -41,6 +44,8 @@ class Masjid_Feed_REST_API {
         add_action('set_object_terms', array($this, 'invalidate_post_caches'));
         add_action('add_option_' . MASJIDFEED_OPTION_KEY, array($this, 'invalidate_settings_caches'));
         add_action('update_option_' . MASJIDFEED_OPTION_KEY, array($this, 'invalidate_settings_caches'));
+        add_action('add_option_' . Masjid_Feed_Parking_Config::OPTION_KEY, array($this, 'invalidate_parking_config_cache'));
+        add_action('update_option_' . Masjid_Feed_Parking_Config::OPTION_KEY, array($this, 'invalidate_parking_config_cache'));
         add_filter('rest_exposed_cors_headers', array($this, 'expose_cache_headers'), 10, 2);
         add_filter('rest_allowed_cors_headers', array($this, 'allow_conditional_request_headers'), 10, 2);
         add_filter('rest_request_before_callbacks', array($this, 'validate_client_user_agent'), 5, 3);
@@ -119,6 +124,12 @@ class Masjid_Feed_REST_API {
         );
         register_rest_route(self::NAMESPACE_, '/posts/(?P<id>\d+)', $post_route);
 
+        register_rest_route(self::NAMESPACE_, '/parking-config', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'get_parking_config'),
+            'permission_callback' => '__return_true',
+        ));
+
         register_rest_route(self::NAMESPACE_, '/push/registrations', array(
             array(
                 'methods' => 'POST',
@@ -168,6 +179,7 @@ class Masjid_Feed_REST_API {
                 'salahApiUrl' => rest_url(self::NAMESPACE_ . '/salahapi'),
                 'eventsUrl' => rest_url(self::NAMESPACE_ . '/events'),
                 'announcementsUrl' => rest_url(self::NAMESPACE_ . '/announcements'),
+                'parkingUrl' => rest_url(self::NAMESPACE_ . '/parking-config'),
             ),
             'contact' => array(
                 'address' => $opts['address'],
@@ -200,6 +212,32 @@ class Masjid_Feed_REST_API {
         );
 
         return $this->cache_response($request, self::CONFIG_CACHE_KEY, $response, self::CONFIG_SHARED_CACHE_TTL);
+    }
+
+    /**
+     * GET /parking-config
+     *
+     * Serves the saved parking map document. When nothing has been saved the
+     * endpoint answers 404 rather than an empty document: the app falls back
+     * to its built-in data on any non-200, but a 200 with "zones": [] would
+     * remove every zone from the map.
+     */
+    public function get_parking_config($request) {
+        $cached_response = $this->get_cached_response($request, self::PARKING_CACHE_KEY, self::PARKING_SHARED_CACHE_TTL);
+        if ($cached_response) {
+            return $cached_response;
+        }
+
+        $document = Masjid_Feed_Parking_Config::get_saved_document();
+        if (null === $document) {
+            return new WP_Error(
+                'masjidfeed_parking_config_missing',
+                __('No parking config has been saved.', 'masjidfeed-app'),
+                array('status' => 404)
+            );
+        }
+
+        return $this->cache_response($request, self::PARKING_CACHE_KEY, $document, self::PARKING_SHARED_CACHE_TTL);
     }
 
     /**
@@ -490,6 +528,13 @@ class Masjid_Feed_REST_API {
     public function invalidate_settings_caches() {
         delete_transient(self::CONFIG_CACHE_KEY);
         $this->invalidate_list_caches();
+    }
+
+    /**
+     * Invalidate the parking payload after the parking configuration changes.
+     */
+    public function invalidate_parking_config_cache() {
+        delete_transient(self::PARKING_CACHE_KEY);
     }
 
     /**

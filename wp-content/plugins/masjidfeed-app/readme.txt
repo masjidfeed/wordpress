@@ -4,7 +4,7 @@ Tags: masjid, mobile app, prayer times, events
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.0.1
+Stable tag: 1.0.2
 License: MIT
 License URI: https://github.com/masjidfeed/wordpress/blob/main/LICENSE
 
@@ -26,6 +26,7 @@ under the `masjid/v1` namespace:
 * `/wp-json/masjid/v1/events` — up to 100 upcoming post objects with event fields (limit parameter, default 20)
 * `/wp-json/masjid/v1/announcements` — up to 20 announcement post objects
 * `/wp-json/masjid/v1/posts/{id}` — one published post with optional event fields
+* `/wp-json/masjid/v1/parking-config` — parking map zones and restriction schedules (404 until saved on the Parking tab)
 * `/wp-json/masjid/v1/push/registrations` — App Check-protected FCM topic registration
 
 Configuration, list, and post responses include ETag and Cache-Control

@@ -93,7 +93,8 @@ Example response:
   "endpoints": {
     "salahApiUrl": "https://example.org/wp-json/masjid/v1/salahapi",
     "eventsUrl": "https://example.org/wp-json/masjid/v1/events",
-    "announcementsUrl": "https://example.org/wp-json/masjid/v1/announcements"
+    "announcementsUrl": "https://example.org/wp-json/masjid/v1/announcements",
+    "parkingUrl": "https://example.org/wp-json/masjid/v1/parking-config"
   },
   "contact": {
     "address": "123 Example Street",
@@ -594,6 +595,82 @@ The endpoint returns `404` with error code `masjidapp_post_not_found` when the
 post is missing, is not a standard WordPress post, is not published, or is
 password protected.
 
+## Parking Map
+
+### `GET /parking-config`
+
+Returns the parking map document consumed by the ICOB app: the mosque's
+location, the parking zone outlines, and the schedules during which
+restrictions apply. The data is maintained by site administrators on the
+plugin's Parking settings tab; the endpoint returns `404` with error code
+`masjidfeed_parking_config_missing` while nothing has been saved, and the app
+falls back to its built-in copy on any non-200 response.
+
+```sh
+curl --fail-with-body --silent --show-error \
+  --user-agent 'ICOB-iOS/2.4.1' \
+  "$BASE_URL/parking-config"
+```
+
+Example response:
+
+```json
+{
+  "center": { "latitude": 47.7779, "longitude": -122.1906 },
+  "nearRadiusMeters": 800,
+  "zones": [
+    {
+      "id": "north-lot",
+      "name": "North lot",
+      "type": "no-parking",
+      "message": "Please move to a permitted parking area.",
+      "coordinates": [
+        { "latitude": 47.77882298016584, "longitude": -122.19132629326828 },
+        { "latitude": 47.77882298016584, "longitude": -122.18952387645021 },
+        { "latitude": 47.77809991713082, "longitude": -122.18952387645021 },
+        { "latitude": 47.77809991713082, "longitude": -122.19132629326828 }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "id": "jummah",
+      "name": "Friday Prayer",
+      "message": "Strict parking rules are in effect for Friday prayer.",
+      "schedule": { "type": "weekly", "days": [5], "start": "11:30", "end": "15:30" },
+      "zoneIds": "all"
+    }
+  ]
+}
+```
+
+Field notes:
+
+- `center` is required; `latitude` and `longitude` are JSON numbers.
+- `nearRadiusMeters` is optional and defaults to `800` when absent. How close
+  to `center` counts as "near" for the parking banner.
+- `zones` is required; `events` is required and may be `[]`.
+- Zone `type` is one of `no-parking` (red), `event-restricted` (yellow), or
+  `allowed` (green). These values are closed: new values need an app release.
+- Zone `coordinates` are `{ "latitude", "longitude" }` objects, at least 3
+  points, first point not repeated at the end; the app closes the shape
+  itself. The coordinate format is closed: `[lat, lon]` arrays are not
+  accepted by the app.
+- `message` is optional and shown to someone standing in the zone while it is
+  off limits.
+- Event `schedule` is either
+  `{"type": "weekly", "days": [0-6], "start": "HH:mm", "end": "HH:mm"}` or
+  `{"type": "dates", "dates": ["YYYY-MM-DD"], "start": "HH:mm", "end":
+  "HH:mm"}`. `days` uses 0 for Sunday through 6 for Saturday. Times are
+  24-hour `HH:mm` read in the phone's local time; a window may run past
+  midnight and the day/date is the one the window starts on. `start` and
+  `end` always differ.
+- Event `zoneIds` is `"all"` or a list of zone `id`s. While an event is
+  active the app shows and checks only the listed zones. When no event is
+  active every zone is shown in its own colour and `event-restricted` zones
+  count as allowed.
+- If two events are active at once, the app uses the one listed first.
+
 ## ETag Caching
 
 The following responses support conditional requests:
@@ -605,6 +682,7 @@ The following responses support conditional requests:
 | `GET /events` | Weak, generated from the JSON payload | `public, max-age=60, s-maxage=300` |
 | `GET /announcements` | Weak, generated from the JSON payload and active filter mode | `public, max-age=60, s-maxage=600` |
 | `GET /posts/{id}` | Weak, generated from the JSON payload | `public, max-age=60, s-maxage=3600` |
+| `GET /parking-config` | Weak, generated from the JSON payload | `public, max-age=60, s-maxage=3600` |
 
 Configuration, event, and post responses use a weak ETag generated from
 the exact JSON payload. Announcement ETags also include whether the regular or
@@ -662,6 +740,7 @@ candidate ETags, or `If-None-Match: *`. Browsers may read `ETag` and send
 `If-None-Match` in cross-origin requests because both headers are included in
 the route's CORS policy.
 
-Saving Masjid App settings invalidates the cached configuration. The next
-`GET /config` rebuilds the response and derives a new ETag when its JSON payload
-has changed.
+Saving Masjid App settings invalidates the cached configuration. Saving the
+parking configuration on the Parking tab invalidates the cached parking
+document the same way. The next `GET /config` rebuilds the response and
+derives a new ETag when its JSON payload has changed.

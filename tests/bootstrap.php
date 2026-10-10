@@ -118,6 +118,7 @@ class WP_REST_Request {
     private $method;
     private $route;
     private $params = [];
+    private $headers = [];
     public function __construct($method = 'GET', $route = '') {
         $this->method = $method;
         $this->route = $route;
@@ -130,6 +131,12 @@ class WP_REST_Request {
     }
     public function get_params() {
         return $this->params;
+    }
+    public function set_header($key, $value) {
+        $this->headers[strtolower((string) $key)] = $value;
+    }
+    public function get_header($key) {
+        return $this->headers[strtolower((string) $key)] ?? null;
     }
     public function get_route() {
         return $this->route;
@@ -155,6 +162,9 @@ class WP_REST_Response {
     }
     public function get_headers() {
         return $this->headers;
+    }
+    public function header($name, $value) {
+        $this->headers[$name] = $value;
     }
 }
 
@@ -511,6 +521,7 @@ require_once $plugin_dir . '/includes/class-firebase.php';
 require_once $plugin_dir . '/includes/class-push-notifications.php';
 require_once $plugin_dir . '/includes/class-api-trace.php';
 require_once $plugin_dir . '/includes/class-legacy-settings-migrator.php';
+require_once $plugin_dir . '/includes/class-parking-config.php';
 require_once $plugin_dir . '/includes/class-settings.php';
 require_once $plugin_dir . '/includes/class-event-sources.php';
 require_once $plugin_dir . '/includes/class-event-source-awesome-calendar-events.php';
