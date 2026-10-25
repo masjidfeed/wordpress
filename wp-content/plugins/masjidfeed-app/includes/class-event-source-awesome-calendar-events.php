@@ -5,9 +5,9 @@
  * Upcoming events are fetched from that plugin's public query API
  * (GET /wp-json/awecal/v1/events, documented in its API.md) without
  * recurring-event expansion, so each feed item represents the event post
- * itself and clients expand occurrences from the recurrence rule. Single
- * post payloads read the `_awecal_` meta keys with a transparent fallback
- * to the legacy `_icob_` prefix.
+ * itself and clients expand occurrences from the recurrence rule. Feed items
+ * and single post payloads read the `_awecal_` meta keys with a transparent
+ * fallback to the legacy `_icob_` prefix.
  */
 
 if (!defined('ABSPATH')) { exit; }
@@ -101,17 +101,7 @@ class Masjid_Feed_Event_Source_Awesome_Calendar_Events implements Masjid_Feed_Ev
         $data['eventDateTime'] = $this->get_single_event_datetime_iso($post_id);
         $data['recurrenceRule'] = $this->get_recurrence_rule($post_id);
 
-        $alert = $this->get_meta($post_id, 'announcement');
-        if ('' !== (string) $alert) {
-            $data['alert'] = (string) $alert;
-        }
-
-        $alert_end_datetime = $this->get_alert_end_datetime_iso($post_id);
-        if ($alert_end_datetime) {
-            $data['alertEndDateTime'] = $alert_end_datetime;
-        }
-
-        return $data;
+        return $this->add_alert_fields($data, $post_id);
     }
 
     private function build_event_post($post_id, array $item) {
@@ -123,6 +113,20 @@ class Masjid_Feed_Event_Source_Awesome_Calendar_Events implements Masjid_Feed_Ev
         $data['location'] = isset($event['location']) ? (string) $event['location'] : '';
         $data['eventDateTime'] = $this->get_occurrence_datetime_iso($occurrence, $event);
         $data['recurrenceRule'] = !empty($event['recurrenceRule']) ? (string) $event['recurrenceRule'] : null;
+
+        return $this->add_alert_fields($data, $post_id);
+    }
+
+    private function add_alert_fields(array $data, $post_id) {
+        $alert = (string) $this->get_meta($post_id, 'announcement');
+        if ('' !== $alert && '0' !== $alert) {
+            $data['alert'] = $alert;
+        }
+
+        $alert_end_datetime = $this->get_alert_end_datetime_iso($post_id);
+        if ($alert_end_datetime) {
+            $data['alertEndDateTime'] = $alert_end_datetime;
+        }
 
         return $data;
     }

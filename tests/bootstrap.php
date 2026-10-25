@@ -80,6 +80,7 @@ if (!defined('DAY_IN_SECONDS')) {
 
 $GLOBALS['__test_options'] = [];
 $GLOBALS['__test_posts'] = [];
+$GLOBALS['__test_post_meta'] = [];
 $GLOBALS['__test_terms'] = [];
 $GLOBALS['__test_terms_list'] = [];
 $GLOBALS['__test_rest_responses'] = [];
@@ -254,6 +255,12 @@ if (!function_exists('home_url')) {
 if (!function_exists('get_post')) {
     function get_post($post_id) {
         return $GLOBALS['__test_posts'][(int) $post_id] ?? null;
+    }
+}
+
+if (!function_exists('get_post_meta')) {
+    function get_post_meta($post_id, $key = '', $single = false) {
+        return $GLOBALS['__test_post_meta'][(int) $post_id][(string) $key] ?? '';
     }
 }
 

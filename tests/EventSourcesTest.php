@@ -12,6 +12,7 @@ class EventSourcesTest extends TestCase {
         $GLOBALS['__test_rest_requests'] = [];
         $GLOBALS['__test_terms'] = [];
         $GLOBALS['__test_posts'] = [];
+        $GLOBALS['__test_post_meta'] = [];
     }
 
     private function queue_rest_response($data, int $status = 200): void {
@@ -206,5 +207,85 @@ class EventSourcesTest extends TestCase {
         $source = new Masjid_Feed_Event_Source_The_Events_Calendar();
         $this->assertNull($source->build_post(9));
         $this->assertCount(0, $GLOBALS['__test_rest_requests']);
+    }
+
+    private function queue_awesome_calendar_response(array $post_ids): void {
+        $items = [];
+        foreach ($post_ids as $id) {
+            $items[] = [
+                'postId' => $id,
+                'event' => [
+                    'date' => '2026-09-05',
+                    'startTime' => '10:00',
+                    'location' => 'Main Hall',
+                ],
+            ];
+        }
+        $this->queue_rest_response($items);
+    }
+
+    private function set_announcement_meta(int $post_id, string $announcement, string $expiration): void {
+        $GLOBALS['__test_post_meta'][$post_id]['_awecal_announcement'] = $announcement;
+        $GLOBALS['__test_post_meta'][$post_id]['_awecal_announcement_expiration'] = $expiration;
+    }
+
+    public function test_awesome_calendar_feed_items_include_alert_fields_from_meta(): void {
+        $this->queue_awesome_calendar_response([31]);
+        $this->set_announcement_meta(31, 'Registration required', '2026-09-05 18:00:00');
+
+        $source = new Masjid_Feed_Event_Source_Awesome_Calendar_Events();
+        $events = $source->get_upcoming_events([]);
+
+        $this->assertCount(1, $events);
+        $this->assertSame('Registration required', $events[0]['alert']);
+        $this->assertSame('2026-09-05T18:00:00+00:00', $events[0]['alertEndDateTime']);
+    }
+
+    public function test_awesome_calendar_feed_items_omit_alert_fields_without_meta(): void {
+        $this->queue_awesome_calendar_response([32]);
+
+        $source = new Masjid_Feed_Event_Source_Awesome_Calendar_Events();
+        $events = $source->get_upcoming_events([]);
+
+        $this->assertCount(1, $events);
+        $this->assertArrayNotHasKey('alert', $events[0]);
+        $this->assertArrayNotHasKey('alertEndDateTime', $events[0]);
+    }
+
+    public function test_awesome_calendar_alert_falls_back_to_legacy_meta(): void {
+        $this->queue_awesome_calendar_response([33]);
+        $GLOBALS['__test_post_meta'][33]['_icob_announcement'] = 'Legacy alert';
+        $GLOBALS['__test_post_meta'][33]['_icob_announcement_expiration'] = '2026-09-05 18:00:00';
+
+        $source = new Masjid_Feed_Event_Source_Awesome_Calendar_Events();
+        $events = $source->get_upcoming_events([]);
+
+        $this->assertCount(1, $events);
+        $this->assertSame('Legacy alert', $events[0]['alert']);
+        $this->assertSame('2026-09-05T18:00:00+00:00', $events[0]['alertEndDateTime']);
+    }
+
+    public function test_awesome_calendar_legacy_zero_announcement_is_not_an_alert(): void {
+        $this->queue_awesome_calendar_response([34]);
+        $GLOBALS['__test_post_meta'][34]['_icob_announcement'] = '0';
+
+        $source = new Masjid_Feed_Event_Source_Awesome_Calendar_Events();
+        $events = $source->get_upcoming_events([]);
+
+        $this->assertCount(1, $events);
+        $this->assertArrayNotHasKey('alert', $events[0]);
+    }
+
+    public function test_awesome_calendar_single_post_includes_alert_fields(): void {
+        $GLOBALS['__test_posts'][35] = (object) ['post_type' => 'post'];
+        $GLOBALS['__test_post_meta'][35]['_awecal_event_date_enabled'] = '1';
+        $this->set_announcement_meta(35, 'Single post alert', '2026-09-05 18:00:00');
+
+        $source = new Masjid_Feed_Event_Source_Awesome_Calendar_Events();
+        $post = $source->build_post(35);
+
+        $this->assertNotNull($post);
+        $this->assertSame('Single post alert', $post['alert']);
+        $this->assertSame('2026-09-05T18:00:00+00:00', $post['alertEndDateTime']);
     }
 }
