@@ -8,6 +8,7 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
 }
 
 delete_option('masjidfeed_settings');
+delete_option('masjidfeed_gateway_registration');
 delete_option('masjidfeed_firebase_credentials');
 delete_option('masjidfeed_gateway_challenge');
 delete_option('masjidfeed_gateway_fetch_token');

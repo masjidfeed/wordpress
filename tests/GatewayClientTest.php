@@ -138,7 +138,7 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_issue_topic_key_forwards_app_check_and_site_id(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = ['gateway_site_id' => 'site-1'];
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = ['site_id' => 'site-1'];
         $gateway = $this->transport([
             $this->response(200, ['site_id' => 'site-1', 'topic' => 'tenant_site-1_v1_secret', 'version' => 1, 'expires_at' => '2026-11-01T00:00:00Z']),
         ]);
@@ -153,7 +153,7 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_issue_topic_key_requires_topic_in_response(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = ['gateway_site_id' => 'site-1'];
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = ['site_id' => 'site-1'];
         $gateway = $this->transport([
             $this->response(200, ['site_id' => 'site-1']),
         ]);
@@ -163,7 +163,7 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_issue_topic_key_maps_invalid_app_check(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = ['gateway_site_id' => 'site-1'];
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = ['site_id' => 'site-1'];
         $gateway = $this->transport([
             $this->response(401, ['error' => ['code' => 'app_check', 'message' => 'invalid app check token']]),
         ]);
@@ -178,9 +178,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_send_posts_gateway_schema(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
         ];
         $gateway = $this->transport([
             $this->response(200, ['send_id' => 'projects/masjidfeed/messages/1', 'state' => 'accepted']),
@@ -209,9 +209,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_send_truncates_long_titles_within_gateway_limit(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
         ];
         $gateway = $this->transport([
             $this->response(200, ['send_id' => 'x']),
@@ -224,9 +224,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_send_truncates_multibyte_bodies_within_gateway_byte_limit(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
         ];
         $gateway = $this->transport([
             $this->response(200, ['send_id' => 'x']),
@@ -246,9 +246,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_send_keeps_short_multibyte_bodies_intact(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
         ];
         $gateway = $this->transport([
             $this->response(200, ['send_id' => 'x']),
@@ -262,7 +262,7 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_error_code_is_captured_from_the_error_envelope(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = ['gateway_site_id' => 'site-1'];
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = ['site_id' => 'site-1'];
         $gateway = $this->transport([
             $this->response(400, ['error' => ['code' => 'verification_failed', 'message' => 'verification fetch rejected: callback status 404']]),
             $this->response(429, ['error' => ['code' => 'daily_quota', 'message' => 'rate limited: daily_quota']]),
@@ -285,7 +285,7 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_error_code_is_empty_without_an_error_envelope(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = ['gateway_site_id' => 'site-1'];
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = ['site_id' => 'site-1'];
         $gateway = $this->transport([
             ['status' => 502, 'headers' => [], 'body' => 'bad gateway'],
         ]);
@@ -299,9 +299,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_validate_connection_posts_to_the_validate_endpoint(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
         ];
         $gateway = $this->transport([
             $this->response(200, ['ok' => true]),
@@ -316,9 +316,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_validate_connection_maps_failures(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'stale-secret',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'stale-secret',
         ];
         $gateway = $this->transport([
             $this->response(401, ['error' => ['code' => 'unauthorized', 'message' => 'invalid gateway secret']]),
@@ -340,9 +340,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_rotate_topic_returns_the_new_version(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
         ];
         $gateway = $this->transport([
             $this->response(200, ['site_id' => 'site-1', 'topic_version' => 2]),
@@ -359,9 +359,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_rotate_topic_rejects_incomplete_response(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
         ];
         $gateway = $this->transport([
             $this->response(200, ['site_id' => 'site-1']),
@@ -372,9 +372,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_site_audit_gets_the_audit_endpoint(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
         ];
         $entries = [
             ['id' => 'a1', 'actor' => 'plugin', 'action' => 'site.registered', 'site_id' => 'site-1', 'at' => '2026-11-01T00:00:00Z'],
@@ -393,9 +393,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_site_audit_maps_unknown_site(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
         ];
         $gateway = $this->transport([
             $this->response(404, ['error' => ['code' => 'not_found', 'message' => 'site not found']]),
@@ -406,9 +406,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_send_status_gets_the_message_record_preserving_slashes(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
         ];
         $record = ['name' => 'projects/masjidfeed/messages/abc-123', 'state' => 'accepted'];
         $gateway = $this->transport([
@@ -430,9 +430,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_send_status_maps_unknown_send(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
         ];
         $gateway = $this->transport([
             $this->response(404, ['error' => ['code' => 'unknown_send', 'message' => 'no FCM record for this send_id']]),
@@ -447,9 +447,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_send_status_rejects_unusable_send_ids(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
         ];
         $gateway = $this->transport([]);
 
@@ -472,9 +472,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_send_maps_rate_limit_with_retry_after(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
         ];
         $gateway = $this->transport([
             $this->response(429, ['error' => ['code' => 'quota', 'message' => 'rate limited: quota']], ['Retry-After' => '90']),
@@ -490,9 +490,9 @@ class GatewayClientTest extends TestCase {
     }
 
     public function test_connection_failure_is_retryable(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = [
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
         ];
         $gateway = new Masjid_Feed_Gateway(function () {
             throw new RuntimeException('cURL error 28');

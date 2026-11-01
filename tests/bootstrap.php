@@ -5,6 +5,7 @@ declare(strict_types=1);
 define('ABSPATH', __DIR__ . '/');
 define('MASJIDFEED_OPTION_KEY', 'masjidfeed_settings');
 define('MASJIDFEED_CREDENTIAL_OPTION_KEY', 'masjidfeed_firebase_credentials');
+define('MASJIDFEED_GATEWAY_OPTION_KEY', 'masjidfeed_gateway_registration');
 define('MINUTE_IN_SECONDS', 60);
 define('HOUR_IN_SECONDS', 3600);
 

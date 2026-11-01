@@ -27,6 +27,10 @@ class SettingsPushTabTest extends TestCase {
         $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = $settings;
     }
 
+    private function store_gateway(array $registration): void {
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = $registration;
+    }
+
     public function test_push_tab_renders_mode_dropdown_and_registration_form(): void {
         $html = $this->render_push_tab();
 
@@ -67,7 +71,7 @@ class SettingsPushTabTest extends TestCase {
         $html = $this->render_push_tab();
         $this->assertStringContainsString('Not registered.', $html);
 
-        $this->store_settings(['gateway_site_id' => 'site-1', 'gateway_secret' => 'secret-1']);
+        $this->store_gateway(['site_id' => 'site-1', 'secret' => 'secret-1']);
         $html = $this->render_push_tab();
         $this->assertStringContainsString('Registered.', $html);
         $this->assertStringContainsString('site-1', $html);
@@ -76,7 +80,7 @@ class SettingsPushTabTest extends TestCase {
     public function test_push_tab_shows_pending_registration_with_validate_button(): void {
         // A pending registration has a site ID but no secret yet: the gateway
         // issued the ID but the one-time secret was never collected.
-        $this->store_settings(['gateway_site_id' => 'site-9']);
+        $this->store_gateway(['site_id' => 'site-9']);
 
         $html = $this->render_push_tab();
 
@@ -98,7 +102,7 @@ class SettingsPushTabTest extends TestCase {
 
         $this->assertSame('Register with MasjidFeed', $GLOBALS['__test_submit_buttons'][0]['text']);
 
-        $this->store_settings(['gateway_site_id' => 'site-1', 'gateway_secret' => 'secret-1']);
+        $this->store_gateway(['site_id' => 'site-1', 'secret' => 'secret-1']);
         $GLOBALS['__test_submit_buttons'] = [];
         $this->render_push_tab();
 
@@ -111,10 +115,10 @@ class SettingsPushTabTest extends TestCase {
     public function test_gateway_pending_reflects_stored_state(): void {
         $this->assertFalse(Masjid_Feed_Settings::is_gateway_pending());
 
-        $this->store_settings(['gateway_site_id' => 'site-9']);
+        $this->store_gateway(['site_id' => 'site-9']);
         $this->assertTrue(Masjid_Feed_Settings::is_gateway_pending());
 
-        $this->store_settings(['gateway_site_id' => 'site-9', 'gateway_secret' => 'secret-1']);
+        $this->store_gateway(['site_id' => 'site-9', 'secret' => 'secret-1']);
         $this->assertFalse(Masjid_Feed_Settings::is_gateway_pending());
         $this->assertTrue(Masjid_Feed_Settings::is_gateway_registered());
     }
@@ -163,14 +167,18 @@ class SettingsPushTabTest extends TestCase {
         $this->assertSame(1, $out['push_enabled']);
     }
 
-    public function test_sanitize_keeps_gateway_registration(): void {
-        $out = $this->sanitize(
-            ['push_mode' => 'masjidfeed', 'push_tag' => 0],
-            ['gateway_site_id' => 'site-1', 'gateway_secret' => 'secret-1']
-        );
+    public function test_settings_save_cannot_touch_the_gateway_registration(): void {
+        // The registration lives in its own option, so a settings-array save
+        // can neither carry nor drop it: a rewrite of masjidfeed_settings
+        // from a stale snapshot must leave the site ID and secret intact.
+        $this->store_gateway(['site_id' => 'site-1', 'secret' => 'secret-1']);
 
-        $this->assertSame('site-1', $out['gateway_site_id']);
-        $this->assertSame('secret-1', $out['gateway_secret']);
+        $out = $this->sanitize(['push_mode' => 'masjidfeed', 'push_tag' => 0]);
+
+        $this->assertArrayNotHasKey('gateway_site_id', $out);
+        $this->assertArrayNotHasKey('gateway_secret', $out);
+        $this->assertSame(['site_id' => 'site-1', 'secret' => 'secret-1'], $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY]);
+        $this->assertTrue(Masjid_Feed_Settings::is_gateway_registered());
     }
 
     private function register_with_gateway(): array {
@@ -195,9 +203,9 @@ class SettingsPushTabTest extends TestCase {
         $result = $this->register_with_gateway();
 
         $this->assertSame('active', $result['state']);
-        $stored = $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY];
-        $this->assertSame('site-1', $stored['gateway_site_id']);
-        $this->assertSame('secret-1', $stored['gateway_secret']);
+        $stored = $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY];
+        $this->assertSame('site-1', $stored['site_id']);
+        $this->assertSame('secret-1', $stored['secret']);
         // The proof challenge and fetch token are consumed once verification
         // completes.
         $this->assertArrayNotHasKey(Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION, $GLOBALS['__test_options']);
@@ -219,9 +227,9 @@ class SettingsPushTabTest extends TestCase {
         $result = $this->register_with_gateway();
 
         $this->assertSame('pending', $result['state']);
-        $stored = $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY];
-        $this->assertSame('site-9', $stored['gateway_site_id']);
-        $this->assertArrayNotHasKey('gateway_secret', $stored);
+        $stored = $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY];
+        $this->assertSame('site-9', $stored['site_id']);
+        $this->assertArrayNotHasKey('secret', $stored);
         // The challenge and fetch token stay stored so the retry path can
         // verify.
         $this->assertSame('test-challenge', $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION]);
@@ -229,7 +237,7 @@ class SettingsPushTabTest extends TestCase {
     }
 
     public function test_registration_completes_pending_site_with_verify(): void {
-        $this->store_settings(['gateway_site_id' => 'site-9']);
+        $this->store_gateway(['site_id' => 'site-9']);
         $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION] = 'pending-challenge';
         $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION] = 'pending-token';
         $GLOBALS['__test_wp_remote_request_responses'] = [
@@ -239,9 +247,9 @@ class SettingsPushTabTest extends TestCase {
         $result = $this->register_with_gateway();
 
         $this->assertSame('active', $result['state']);
-        $stored = $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY];
-        $this->assertSame('site-9', $stored['gateway_site_id']);
-        $this->assertSame('secret-2', $stored['gateway_secret']);
+        $stored = $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY];
+        $this->assertSame('site-9', $stored['site_id']);
+        $this->assertSame('secret-2', $stored['secret']);
         $this->assertSame(
             'https://masjidfeed-app.gsf8.org/v1/sites/site-9/verify',
             $GLOBALS['__test_wp_remote_requests'][0]['url']
@@ -255,7 +263,7 @@ class SettingsPushTabTest extends TestCase {
     }
 
     public function test_registration_starts_over_when_pending_challenge_expired(): void {
-        $this->store_settings(['gateway_site_id' => 'site-9']);
+        $this->store_gateway(['site_id' => 'site-9']);
         $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION] = 'pending-challenge';
         $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION] = 'pending-token';
         $GLOBALS['__test_wp_remote_request_responses'] = [
@@ -266,9 +274,9 @@ class SettingsPushTabTest extends TestCase {
         $result = $this->register_with_gateway();
 
         $this->assertSame('active', $result['state']);
-        $stored = $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY];
-        $this->assertSame('site-new', $stored['gateway_site_id']);
-        $this->assertSame('secret-3', $stored['gateway_secret']);
+        $stored = $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY];
+        $this->assertSame('site-new', $stored['site_id']);
+        $this->assertSame('secret-3', $stored['secret']);
         $this->assertCount(2, $GLOBALS['__test_wp_remote_requests']);
         $this->assertStringEndsWith('/v1/sites/site-9/verify', $GLOBALS['__test_wp_remote_requests'][0]['url']);
         $this->assertStringEndsWith('/v1/sites', $GLOBALS['__test_wp_remote_requests'][1]['url']);
@@ -280,7 +288,7 @@ class SettingsPushTabTest extends TestCase {
     }
 
     public function test_registration_failure_keeps_pending_state_for_retry(): void {
-        $this->store_settings(['gateway_site_id' => 'site-9']);
+        $this->store_gateway(['site_id' => 'site-9']);
         $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION] = 'pending-challenge';
         $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION] = 'pending-token';
         $GLOBALS['__test_wp_remote_request_responses'] = [
@@ -295,9 +303,9 @@ class SettingsPushTabTest extends TestCase {
         }
         // Nothing was overwritten: the pending site and its challenge/token
         // stay in place so the next attempt retries verification.
-        $stored = $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY];
-        $this->assertSame('site-9', $stored['gateway_site_id']);
-        $this->assertArrayNotHasKey('gateway_secret', $stored);
+        $stored = $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY];
+        $this->assertSame('site-9', $stored['site_id']);
+        $this->assertArrayNotHasKey('secret', $stored);
         $this->assertSame('pending-challenge', $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION]);
         $this->assertSame('pending-token', $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION]);
     }
@@ -306,7 +314,7 @@ class SettingsPushTabTest extends TestCase {
         // A definitive verification rejection tears the pending site down at
         // the gateway, so the next verify attempt answers 404 and the plugin
         // must start a fresh registration instead of retrying a dead site.
-        $this->store_settings(['gateway_site_id' => 'site-9']);
+        $this->store_gateway(['site_id' => 'site-9']);
         $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION] = 'pending-challenge';
         $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION] = 'pending-token';
         $GLOBALS['__test_wp_remote_request_responses'] = [
@@ -317,9 +325,9 @@ class SettingsPushTabTest extends TestCase {
         $result = $this->register_with_gateway();
 
         $this->assertSame('active', $result['state']);
-        $stored = $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY];
-        $this->assertSame('site-new', $stored['gateway_site_id']);
-        $this->assertSame('secret-4', $stored['gateway_secret']);
+        $stored = $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY];
+        $this->assertSame('site-new', $stored['site_id']);
+        $this->assertSame('secret-4', $stored['secret']);
         $this->assertCount(2, $GLOBALS['__test_wp_remote_requests']);
         $this->assertStringEndsWith('/v1/sites/site-9/verify', $GLOBALS['__test_wp_remote_requests'][0]['url']);
         $this->assertStringEndsWith('/v1/sites', $GLOBALS['__test_wp_remote_requests'][1]['url']);
@@ -338,7 +346,7 @@ class SettingsPushTabTest extends TestCase {
         // was revoked or banned. Retrying verify could never succeed, so the
         // flow must start a fresh registration — for a revoked site the
         // gateway replaces it and onboarding completes here.
-        $this->store_settings(['gateway_site_id' => 'site-9']);
+        $this->store_gateway(['site_id' => 'site-9']);
         $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION] = 'pending-challenge';
         $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION] = 'pending-token';
         $GLOBALS['__test_wp_remote_request_responses'] = [
@@ -349,9 +357,9 @@ class SettingsPushTabTest extends TestCase {
         $result = $this->register_with_gateway();
 
         $this->assertSame('active', $result['state']);
-        $stored = $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY];
-        $this->assertSame('site-new', $stored['gateway_site_id']);
-        $this->assertSame('secret-5', $stored['gateway_secret']);
+        $stored = $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY];
+        $this->assertSame('site-new', $stored['site_id']);
+        $this->assertSame('secret-5', $stored['secret']);
         $this->assertCount(2, $GLOBALS['__test_wp_remote_requests']);
         $this->assertStringEndsWith('/v1/sites/site-9/verify', $GLOBALS['__test_wp_remote_requests'][0]['url']);
         $this->assertStringEndsWith('/v1/sites', $GLOBALS['__test_wp_remote_requests'][1]['url']);
@@ -366,7 +374,7 @@ class SettingsPushTabTest extends TestCase {
         // NEW site ID with the OLD secret: that would look registered while
         // every gateway call answers 401, and the next attempt would skip
         // verification because a secret is set.
-        $this->store_settings(['gateway_site_id' => 'site-old', 'gateway_secret' => 'stale-secret']);
+        $this->store_gateway(['site_id' => 'site-old', 'secret' => 'stale-secret']);
         $GLOBALS['__test_wp_remote_request_responses'] = [
             $this->http_response(201, ['site_id' => 'site-new', 'status' => 'pending', 'verification_url' => 'https://example.test/wp-json/masjid/v1/gateway-verification']),
         ];
@@ -374,9 +382,9 @@ class SettingsPushTabTest extends TestCase {
         $result = $this->register_with_gateway();
 
         $this->assertSame('pending', $result['state']);
-        $stored = $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY];
-        $this->assertSame('site-new', $stored['gateway_site_id']);
-        $this->assertArrayNotHasKey('gateway_secret', $stored);
+        $stored = $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY];
+        $this->assertSame('site-new', $stored['site_id']);
+        $this->assertArrayNotHasKey('secret', $stored);
         $this->assertFalse(Masjid_Feed_Settings::is_gateway_registered());
         $this->assertTrue(Masjid_Feed_Settings::is_gateway_pending());
         // The fresh attempt's challenge and fetch token stay stored so the
@@ -389,7 +397,7 @@ class SettingsPushTabTest extends TestCase {
         // A verify response is only complete with the one-time secret:
         // storing an empty secret would report success to the admin while
         // the registration never actually completed.
-        $this->store_settings(['gateway_site_id' => 'site-9']);
+        $this->store_gateway(['site_id' => 'site-9']);
         $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION] = 'pending-challenge';
         $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION] = 'pending-token';
         $GLOBALS['__test_wp_remote_request_responses'] = [
@@ -404,9 +412,9 @@ class SettingsPushTabTest extends TestCase {
         }
         // Nothing was overwritten: the pending site stays pending for a
         // retry.
-        $stored = $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY];
-        $this->assertSame('site-9', $stored['gateway_site_id']);
-        $this->assertArrayNotHasKey('gateway_secret', $stored);
+        $stored = $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY];
+        $this->assertSame('site-9', $stored['site_id']);
+        $this->assertArrayNotHasKey('secret', $stored);
         $this->assertSame('pending-challenge', $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION]);
         $this->assertSame('pending-token', $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION]);
     }
@@ -458,7 +466,7 @@ class SettingsPushTabTest extends TestCase {
     public function test_push_tab_renders_topic_rotation_only_when_registered(): void {
         $this->assertStringNotContainsString('masjidfeed_rotate_gateway_topic', $this->render_push_tab());
 
-        $this->store_settings(['gateway_site_id' => 'site-1', 'gateway_secret' => 'secret-1']);
+        $this->store_gateway(['site_id' => 'site-1', 'secret' => 'secret-1']);
         $html = $this->render_push_tab();
         $this->assertStringContainsString('masjidfeed_rotate_gateway_topic', $html);
         // submit_button() is a no-op in the harness, so assert the helper
@@ -536,5 +544,116 @@ class SettingsPushTabTest extends TestCase {
         $this->assertStringContainsString('Send status', $html);
         $this->assertStringContainsString('projects/masjidfeed/messages/abc-123', $html);
         $this->assertArrayNotHasKey(Masjid_Feed_Settings::GATEWAY_SEND_STATUS_TRANSIENT, $GLOBALS['__test_transients']);
+    }
+
+    public function test_obfuscation_masks_secret_looking_values_only(): void {
+        $this->assertSame('abcd…wxyz', Masjid_Feed_Settings::obfuscate_setting('abcdefghijklmnopwxyz', 'gateway_secret'));
+        // Short secrets are fully masked instead of half-exposed.
+        $masked = Masjid_Feed_Settings::obfuscate_setting('shortsecret', 'gateway_secret');
+        $this->assertStringNotContainsString('shortsecret', $masked);
+        // Plain settings pass through untouched.
+        $this->assertSame('masjid-312fc341', Masjid_Feed_Settings::obfuscate_setting('masjid-312fc341', 'masjid_id'));
+        $this->assertSame('https://example.org', Masjid_Feed_Settings::obfuscate_setting('https://example.org', 'website'));
+        // Firebase config arrays mask key-like fields and keep the rest.
+        $config = Masjid_Feed_Settings::obfuscate_setting(
+            ['appId' => '1:275056678751:ios:abc', 'apiKey' => 'AIzaSuperSecretKeyValue'],
+            'firebase_ios_config'
+        );
+        $this->assertSame('1:275056678751:ios:abc', $config['appId']);
+        $this->assertStringNotContainsString('AIzaSuperSecretKeyValue', (string) $config['apiKey']);
+        // Booleans and counters are not secrets.
+        $this->assertSame(1, Masjid_Feed_Settings::obfuscate_setting(1, 'feature_events'));
+        $this->assertTrue(Masjid_Feed_Settings::obfuscate_setting(true, 'gateway_secret'));
+        $this->assertSame('', Masjid_Feed_Settings::obfuscate_setting('', 'gateway_secret'));
+    }
+
+    private function build_settings_snapshot(): array {
+        $method = new ReflectionMethod(Masjid_Feed_Settings::class, 'settings_snapshot');
+        return $method->invoke(new Masjid_Feed_Settings());
+    }
+
+    public function test_settings_snapshot_lists_stored_keys_and_masks_secrets(): void {
+        // The dump reflects exactly what the options hold: the gateway
+        // registration comes from its own option, and a missing settings key
+        // is not stored at all.
+        $this->store_settings(['masjid_name' => 'Islamic Center of Bothell']);
+        $this->store_gateway(['site_id' => 'site-1', 'secret' => 'abcdefghijklmnopwxyz']);
+        $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION] = 'token-value';
+
+        $snapshot = $this->build_settings_snapshot();
+
+        $this->assertSame('Islamic Center of Bothell', $snapshot['settings']['masjid_name']);
+        $this->assertArrayNotHasKey('gateway_site_id', $snapshot['settings']);
+        $this->assertArrayNotHasKey('gateway_secret', $snapshot['settings']);
+        $this->assertArrayNotHasKey('push_tag', $snapshot['settings']);
+        $this->assertSame('site-1', $snapshot['companion']['gateway_site_id']);
+        $this->assertSame('abcd…wxyz', $snapshot['companion']['gateway_secret']);
+        $this->assertStringNotContainsString('abcdefghijklmnopwxyz', wp_json_encode($snapshot));
+        $this->assertFalse($snapshot['companion']['gateway_challenge_stored']);
+        $this->assertTrue($snapshot['companion']['gateway_fetch_token_stored']);
+    }
+
+    public function test_gateway_registration_migrates_out_of_the_settings_array(): void {
+        // Registrations stored by earlier plugin versions lived inside
+        // masjidfeed_settings, where a whole-array rewrite could drop them;
+        // the migration moves them into the dedicated option and clears the
+        // settings keys.
+        $this->store_settings(['gateway_site_id' => 'site-1', 'gateway_secret' => 'secret-1', 'masjid_name' => 'ICO B']);
+
+        $this->migrate_gateway_registration();
+
+        $this->assertSame(['site_id' => 'site-1', 'secret' => 'secret-1'], $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY]);
+        $this->assertSame(['masjid_name' => 'ICO B'], $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY]);
+        $this->assertTrue(Masjid_Feed_Settings::is_gateway_registered());
+    }
+
+    public function test_gateway_registration_migration_is_idempotent_and_skips_fresh_state(): void {
+        $this->migrate_gateway_registration();
+        $this->assertArrayNotHasKey(MASJIDFEED_GATEWAY_OPTION_KEY, $GLOBALS['__test_options']);
+
+        $this->store_gateway(['site_id' => 'site-2', 'secret' => 'secret-2']);
+        $this->store_settings(['gateway_site_id' => 'site-old', 'gateway_secret' => 'old-secret']);
+
+        $this->migrate_gateway_registration();
+
+        // The dedicated option wins; the settings-array copy is discarded.
+        $this->assertSame(['site_id' => 'site-2', 'secret' => 'secret-2'], $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY]);
+    }
+
+    private function migrate_gateway_registration(): void {
+        $method = new ReflectionMethod(Masjid_Feed_Settings::class, 'migrate_gateway_registration');
+        $method->invoke(new Masjid_Feed_Settings());
+    }
+
+    private function render_settings_snapshot(): string {
+        ob_start();
+        $method = new ReflectionMethod(Masjid_Feed_Settings::class, 'render_settings_snapshot');
+        $method->invoke(new Masjid_Feed_Settings());
+        return (string) ob_get_clean();
+    }
+
+    public function test_settings_snapshot_renders_and_consumes_transient(): void {
+        $GLOBALS['__test_transients'][Masjid_Feed_Settings::SETTINGS_SNAPSHOT_TRANSIENT] = [
+            'settings' => ['push_mode' => 'masjidfeed'],
+            'companion' => [
+                'gateway_site_id' => 'site-1',
+                'gateway_secret' => 'abcd…wxyz',
+                'gateway_challenge_stored' => false,
+                'gateway_fetch_token_stored' => true,
+                'credential_encryption_available' => true,
+                'firebase_credentials_stored' => false,
+                'api_trace_enabled' => false,
+                'database_version' => '1.1.0',
+            ],
+        ];
+
+        $html = $this->render_settings_snapshot();
+
+        $this->assertStringContainsString('masjidfeed_show_settings', $html);
+        $this->assertStringContainsString('site-1', $html);
+        $this->assertStringContainsString('abcd…wxyz', $html);
+        $this->assertStringContainsString('1.1.0', $html);
+        // The transient is consumed on display.
+        $this->assertArrayNotHasKey(Masjid_Feed_Settings::SETTINGS_SNAPSHOT_TRANSIENT, $GLOBALS['__test_transients']);
     }
 }

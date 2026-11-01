@@ -21,6 +21,10 @@ class PushRegistrationsTest extends TestCase {
         $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = array_merge(['masjid_id' => 'masjid-x'], $settings);
     }
 
+    private function store_gateway(array $registration): void {
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = $registration;
+    }
+
     private function rest_request(string $method): WP_REST_Request {
         $request = new WP_REST_Request($method, '/masjid/v1/push/registrations');
         $request->set_param('masjidId', 'masjid-x');
@@ -49,9 +53,8 @@ class PushRegistrationsTest extends TestCase {
         $this->store_settings([
             'push_mode' => 'masjidfeed',
             'push_enabled' => 1,
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
         ]);
+        $this->store_gateway(['site_id' => 'site-1']);
         $api = $this->api($this->gateway_transport([
             ['status' => 200, 'headers' => [], 'body' => json_encode(['site_id' => 'site-1', 'topic' => 'tenant_site-1_v1_secret', 'version' => 1, 'expires_at' => '2026-11-01T00:00:00Z'])],
         ]));
@@ -73,9 +76,8 @@ class PushRegistrationsTest extends TestCase {
         $this->store_settings([
             'push_mode' => 'masjidfeed',
             'push_enabled' => 1,
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
         ]);
+        $this->store_gateway(['site_id' => 'site-1']);
         $api = $this->api($this->gateway_transport([
             ['status' => 401, 'headers' => [], 'body' => json_encode(['error' => ['code' => 'app_check', 'message' => 'invalid app check token']])],
         ]));
@@ -118,9 +120,8 @@ class PushRegistrationsTest extends TestCase {
         $this->store_settings([
             'push_mode' => 'both',
             'push_enabled' => 1,
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
         ]);
+        $this->store_gateway(['site_id' => 'site-1']);
         $api = $this->api($this->gateway_transport([
             ['status' => 200, 'headers' => [], 'body' => json_encode(['site_id' => 'site-1', 'topic' => 'tenant_site-1_v1_secret', 'version' => 1, 'expires_at' => '2026-11-01T00:00:00Z'])],
         ]));
@@ -149,9 +150,8 @@ class PushRegistrationsTest extends TestCase {
         $this->store_settings([
             'push_mode' => 'both',
             'push_enabled' => 1,
-            'gateway_site_id' => 'site-1',
-            'gateway_secret' => 'secret-1',
         ]);
+        $this->store_gateway(['site_id' => 'site-1']);
         $api = $this->api($this->gateway_transport([
             ['status' => 200, 'headers' => [], 'body' => json_encode(['site_id' => 'site-1', 'topic' => 'tenant_site-1_v1_secret', 'version' => 1, 'expires_at' => '2026-11-01T00:00:00Z'])],
         ]));

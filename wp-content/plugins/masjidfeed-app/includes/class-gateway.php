@@ -197,7 +197,7 @@ class Masjid_Feed_Gateway {
      * the canonical topic the app subscribes to client-side.
      */
     public function issue_topic_key(string $app_check_token): array {
-        $site_id = (string) Masjid_Feed_Settings::get_option('gateway_site_id');
+        $site_id = Masjid_Feed_Settings::gateway_site_id();
         if ('' === $site_id) {
             throw new Masjid_Feed_Gateway_Exception(__('This site is not registered with the MasjidFeed push service.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
         }
@@ -219,8 +219,8 @@ class Masjid_Feed_Gateway {
      * the send_id (the FCM message name).
      */
     public function send(array $payload): string {
-        $site_id = (string) Masjid_Feed_Settings::get_option('gateway_site_id');
-        $secret = (string) Masjid_Feed_Settings::get_option('gateway_secret');
+        $site_id = Masjid_Feed_Settings::gateway_site_id();
+        $secret = Masjid_Feed_Settings::gateway_secret();
         if ('' === $site_id || '' === $secret) {
             throw new Masjid_Feed_Gateway_Exception(__('This site is not registered with the MasjidFeed push service.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
         }
@@ -309,8 +309,8 @@ class Masjid_Feed_Gateway {
      * completed registration; $body is omitted for the GET endpoints.
      */
     private function authorized_request(string $method, string $suffix, ?array $body): array {
-        $site_id = (string) Masjid_Feed_Settings::get_option('gateway_site_id');
-        $secret = (string) Masjid_Feed_Settings::get_option('gateway_secret');
+        $site_id = Masjid_Feed_Settings::gateway_site_id();
+        $secret = Masjid_Feed_Settings::gateway_secret();
         if ('' === $site_id || '' === $secret) {
             throw new Masjid_Feed_Gateway_Exception(__('This site is not registered with the MasjidFeed push service.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
         }

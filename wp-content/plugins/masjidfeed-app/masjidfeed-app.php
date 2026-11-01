@@ -27,6 +27,7 @@ define('MASJIDFEED_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('MASJIDFEED_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('MASJIDFEED_OPTION_KEY', 'masjidfeed_settings');
 define('MASJIDFEED_CREDENTIAL_OPTION_KEY', 'masjidfeed_firebase_credentials');
+define('MASJIDFEED_GATEWAY_OPTION_KEY', 'masjidfeed_gateway_registration');
 define('MASJIDFEED_DB_VERSION', '1.1.0');
 
 /**

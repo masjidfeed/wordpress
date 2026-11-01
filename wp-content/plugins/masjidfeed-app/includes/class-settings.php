@@ -22,6 +22,7 @@ class Masjid_Feed_Settings {
     const GATEWAY_FETCH_TOKEN_OPTION = 'masjidfeed_gateway_fetch_token';
     const GATEWAY_AUDIT_TRANSIENT = 'masjidfeed_gateway_audit';
     const GATEWAY_SEND_STATUS_TRANSIENT = 'masjidfeed_gateway_send_status';
+    const SETTINGS_SNAPSHOT_TRANSIENT = 'masjidfeed_settings_snapshot';
     const PUSH_MODE_DISABLED = 'disabled';
     const PUSH_MODE_MASJIDFEED = 'masjidfeed';
     const PUSH_MODE_FCM = 'fcm';
@@ -40,9 +41,11 @@ class Masjid_Feed_Settings {
         add_action('admin_post_masjidfeed_test_push', array($this, 'handle_test_push'));
         add_action('admin_post_masjidfeed_toggle_api_tracing', array($this, 'handle_toggle_api_tracing'));
         add_action('admin_post_masjidfeed_clear_api_traces', array($this, 'handle_clear_api_traces'));
+        add_action('admin_post_masjidfeed_show_settings', array($this, 'handle_show_settings'));
         // Late priority so it still fires on the current init run: this class
         // is constructed from the plugin's own init callback.
         add_action('init', array($this, 'sync_masjid_id'), 20);
+        add_action('init', array($this, 'migrate_gateway_registration'), 20);
     }
 
     /**
@@ -93,10 +96,7 @@ class Masjid_Feed_Settings {
      * secret sends are authenticated with.
      */
     public static function is_gateway_registered() {
-        $opts = get_option(MASJIDFEED_OPTION_KEY, array());
-        $opts = is_array($opts) ? $opts : array();
-        return '' !== (string) ($opts['gateway_site_id'] ?? '')
-            && '' !== (string) ($opts['gateway_secret'] ?? '');
+        return '' !== self::gateway_site_id() && '' !== self::gateway_secret();
     }
 
     /**
@@ -107,10 +107,79 @@ class Masjid_Feed_Settings {
      * (POST /v1/sites/{site_id}/verify, wp-plugin-integration.md §3.3).
      */
     public static function is_gateway_pending() {
-        $opts = get_option(MASJIDFEED_OPTION_KEY, array());
-        $opts = is_array($opts) ? $opts : array();
-        return '' !== (string) ($opts['gateway_site_id'] ?? '')
-            && '' === (string) ($opts['gateway_secret'] ?? '');
+        return '' !== self::gateway_site_id() && '' === self::gateway_secret();
+    }
+
+    /**
+     * The registration lives in its own option, never inside the settings
+     * array: settings form saves and other whole-array writers rewrite
+     * masjidfeed_settings from their own snapshot, and any such rewrite
+     * would silently drop the site ID and secret. Keeping them in a
+     * dedicated option makes the registration survive every settings
+     * rewrite (and the stale-cache read window that once cost this site its
+     * issued secret).
+     */
+    public static function gateway_site_id() {
+        return (string) (self::gateway_registration()['site_id'] ?? '');
+    }
+
+    public static function gateway_secret() {
+        return (string) (self::gateway_registration()['secret'] ?? '');
+    }
+
+    private static function gateway_registration() {
+        $registration = get_option(MASJIDFEED_GATEWAY_OPTION_KEY, array());
+        return is_array($registration) ? $registration : array();
+    }
+
+    /**
+     * Persist a completed registration: site ID plus the one-time gateway
+     * secret in the dedicated option.
+     */
+    public static function save_gateway_registration(array $registration) {
+        update_option(MASJIDFEED_GATEWAY_OPTION_KEY, array(
+            'site_id' => (string) $registration['site_id'],
+            'secret' => (string) $registration['gateway_secret'],
+        ), false);
+    }
+
+    /**
+     * Remember a pending site so the next attempt completes onboarding
+     * through verify_site(); the previous registration's secret, if any,
+     * is dropped with the site ID it belonged to — the new site replaced
+     * that registration, so a kept secret would pair the new site ID with
+     * a credential the gateway has already invalidated.
+     */
+    public static function store_gateway_pending_site(string $site_id) {
+        if ('' === $site_id) {
+            delete_option(MASJIDFEED_GATEWAY_OPTION_KEY);
+            return;
+        }
+        update_option(MASJIDFEED_GATEWAY_OPTION_KEY, array('site_id' => $site_id), false);
+    }
+
+    /**
+     * One-time move of the gateway registration out of the settings array
+     * (where whole-array rewrites could drop it) into the dedicated option.
+     */
+    public function migrate_gateway_registration() {
+        if ('' !== self::gateway_site_id()) {
+            return;
+        }
+        $settings = get_option(MASJIDFEED_OPTION_KEY, null);
+        if (!is_array($settings)) {
+            return;
+        }
+        $site_id = (string) ($settings['gateway_site_id'] ?? '');
+        if ('' === $site_id) {
+            return;
+        }
+        self::save_gateway_registration(array(
+            'site_id' => $site_id,
+            'gateway_secret' => (string) ($settings['gateway_secret'] ?? ''),
+        ));
+        unset($settings['gateway_site_id'], $settings['gateway_secret']);
+        update_option(MASJIDFEED_OPTION_KEY, $settings);
     }
 
     /**
@@ -148,7 +217,6 @@ class Masjid_Feed_Settings {
             'friday_announcements_category' => 0,
             'push_enabled' => 0,
             'push_mode' => self::PUSH_MODE_MASJIDFEED,
-            'gateway_site_id' => '',
             'push_tag' => 0,
             'push_deep_link_template' => '',
             'firebase_project_id' => '',
@@ -440,6 +508,7 @@ class Masjid_Feed_Settings {
             } elseif ('parking' === $current_tab) {
                 $this->render_parking_tab();
             } elseif ('debug' === $current_tab) {
+                $this->render_settings_snapshot();
                 $this->render_api_trace_tools();
                 $this->render_gateway_tools();
                 $this->render_firebase_tools();
@@ -687,9 +756,9 @@ class Masjid_Feed_Settings {
                 <th scope="row"><?php esc_html_e('Registration', 'masjidfeed-app'); ?></th>
                 <td>
                     <?php if (self::is_gateway_registered()) : ?>
-                        <p><strong><?php esc_html_e('Registered.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html((string) self::get_option('gateway_site_id')); ?></code></p>
+                        <p><strong><?php esc_html_e('Registered.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html(self::gateway_site_id()); ?></code></p>
                     <?php elseif ($pending) : ?>
-                        <p><strong><?php esc_html_e('Pending.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html((string) self::get_option('gateway_site_id')); ?></code></p>
+                        <p><strong><?php esc_html_e('Pending.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html(self::gateway_site_id()); ?></code></p>
                     <?php else : ?>
                         <p><strong><?php esc_html_e('Not registered.', 'masjidfeed-app'); ?></strong></p>
                     <?php endif; ?>
@@ -1050,6 +1119,70 @@ class Masjid_Feed_Settings {
         $this->redirect_with_notice('api_traces_cleared', 'success', 'debug');
     }
 
+    public function handle_show_settings() {
+        check_admin_referer('masjidfeed_show_settings');
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjidfeed-app'));
+        }
+        set_transient(self::SETTINGS_SNAPSHOT_TRANSIENT, $this->settings_snapshot(), 5 * MINUTE_IN_SECONDS);
+        $this->redirect_with_notice('settings_snapshot', 'success', 'debug');
+    }
+
+    /**
+     * Build the Debug-tab settings snapshot: every key actually stored in the
+     * settings option (missing keys are deliberately absent — that is the
+     * diagnostic) with secret values partially obfuscated, plus related
+     * plugin state that cannot be read from the option alone.
+     */
+    private function settings_snapshot() {
+        $stored = get_option(MASJIDFEED_OPTION_KEY, array());
+        $stored = is_array($stored) ? $stored : array();
+        $settings = array();
+        foreach ($stored as $key => $value) {
+            $settings[(string) $key] = self::obfuscate_setting($value, (string) $key);
+        }
+        return array(
+            'settings' => $settings,
+            'companion' => array(
+                'gateway_site_id' => self::gateway_site_id(),
+                'gateway_secret' => self::obfuscate_setting(self::gateway_secret(), 'gateway_secret'),
+                'gateway_challenge_stored' => '' !== (string) get_option(self::GATEWAY_CHALLENGE_OPTION, ''),
+                'gateway_fetch_token_stored' => '' !== (string) get_option(self::GATEWAY_FETCH_TOKEN_OPTION, ''),
+                'credential_encryption_available' => Masjid_Feed_Credential_Store::is_available(),
+                'firebase_credentials_stored' => Masjid_Feed_Credential_Store::has_credentials(),
+                'api_trace_enabled' => Masjid_Feed_API_Trace::is_enabled(),
+                'database_version' => (string) get_option('masjidfeed_db_version', ''),
+            ),
+        );
+    }
+
+    /**
+     * Mask string values stored under secret-looking keys. The first and
+     * last characters stay visible so stored values remain comparable
+     * across checks without exposing them; short values are fully masked.
+     * Non-string values (booleans, counters) are not secrets and pass
+     * through untouched.
+     */
+    public static function obfuscate_setting($value, $key = '') {
+        if (is_array($value)) {
+            $masked = array();
+            foreach ($value as $child_key => $child_value) {
+                $masked[$child_key] = self::obfuscate_setting($child_value, (string) $child_key);
+            }
+            return $masked;
+        }
+        if (!is_string($value) || '' === $value) {
+            return $value;
+        }
+        if (!preg_match('/secret|token|key|password|credential|private|firebase_/i', $key)) {
+            return $value;
+        }
+        if (strlen($value) <= 12) {
+            return str_repeat('•', max(4, strlen($value)));
+        }
+        return substr($value, 0, 4) . '…' . substr($value, -4);
+    }
+
     public function handle_register_gateway() {
         check_admin_referer('masjidfeed_register_gateway');
         if (!current_user_can('manage_options')) {
@@ -1199,10 +1332,8 @@ class Masjid_Feed_Settings {
      */
     private function register_with_gateway() {
         $gateway = new Masjid_Feed_Gateway();
-        $settings = get_option(MASJIDFEED_OPTION_KEY, array());
-        $settings = is_array($settings) ? $settings : array();
-        $site_id = (string) ($settings['gateway_site_id'] ?? '');
-        $secret = (string) ($settings['gateway_secret'] ?? '');
+        $site_id = self::gateway_site_id();
+        $secret = self::gateway_secret();
 
         if ('' !== $site_id && '' === $secret) {
             try {
@@ -1249,29 +1380,19 @@ class Masjid_Feed_Settings {
         }
         // Callback failed retryably: keep serving the challenge to the
         // token-holding gateway and remember the site so the next attempt
-        // completes onboarding through verify_site(). The stored secret is
-        // dropped with the site ID it belonged to: this attempt replaced
-        // that registration, so a secret kept here would pair the new site
-        // ID with a credential the gateway has already invalidated — and
-        // make the next attempt skip verification because a secret is set.
-        $settings = get_option(MASJIDFEED_OPTION_KEY, array());
-        $settings = is_array($settings) ? $settings : array();
-        $settings['gateway_site_id'] = $registration['site_id'];
-        unset($settings['gateway_secret']);
-        update_option(MASJIDFEED_OPTION_KEY, $settings);
+        // completes onboarding through verify_site(). store_gateway_pending_site()
+        // drops the replaced registration's secret with its site ID.
+        self::store_gateway_pending_site($registration['site_id']);
         return array('state' => 'pending', 'site_id' => $registration['site_id']);
     }
 
     /**
      * Persist a completed registration: site ID plus the one-time gateway
-     * secret, dropping the now-consumed proof challenge and fetch token.
+     * secret in the dedicated option, dropping the now-consumed proof
+     * challenge and fetch token.
      */
     private function store_gateway_registration(array $registration) {
-        $settings = get_option(MASJIDFEED_OPTION_KEY, array());
-        $settings = is_array($settings) ? $settings : array();
-        $settings['gateway_site_id'] = $registration['site_id'];
-        $settings['gateway_secret'] = $registration['gateway_secret'];
-        update_option(MASJIDFEED_OPTION_KEY, $settings);
+        self::save_gateway_registration($registration);
         delete_option(self::GATEWAY_CHALLENGE_OPTION);
         delete_option(self::GATEWAY_FETCH_TOKEN_OPTION);
         return array('state' => 'active', 'site_id' => $registration['site_id']);
@@ -1474,6 +1595,7 @@ class Masjid_Feed_Settings {
                 'api_tracing_enabled' => __('API call tracing enabled.', 'masjidfeed-app'),
                 'api_tracing_disabled' => __('API call tracing disabled.', 'masjidfeed-app'),
                 'api_traces_cleared' => __('API call traces cleared.', 'masjidfeed-app'),
+                'settings_snapshot' => __('Settings snapshot generated below.', 'masjidfeed-app'),
                 'gateway_valid' => __('The push service accepted this site\'s credentials.', 'masjidfeed-app'),
                 'gateway_not_registered' => __('This site is not registered with the MasjidFeed push service.', 'masjidfeed-app'),
                 'gateway_audit_fetched' => __('Gateway audit trail fetched.', 'masjidfeed-app'),
@@ -1482,6 +1604,97 @@ class Masjid_Feed_Settings {
             );
             echo '<div class="notice notice-' . esc_attr('error' === $notice_type ? 'error' : 'success') . '"><p>' . esc_html($messages[$notice] ?? rawurldecode($notice)) . '</p></div>';
         }
+    }
+
+    /**
+     * Diagnostic dump of the stored settings, fetched on demand by
+     * handle_show_settings(). Missing keys are meaningful: a key that does
+     * not appear (for example gateway_site_id) is not stored at all, which
+     * is the difference between a half-completed registration and a saved
+     * one. Secret values are partially masked by obfuscate_setting().
+     */
+    private function render_settings_snapshot() {
+        $snapshot = get_transient(self::SETTINGS_SNAPSHOT_TRANSIENT);
+        delete_transient(self::SETTINGS_SNAPSHOT_TRANSIENT);
+        ?>
+        <h3><?php esc_html_e('Stored settings', 'masjidfeed-app'); ?></h3>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-bottom:8px;">
+            <input type="hidden" name="action" value="masjidfeed_show_settings" /><?php wp_nonce_field('masjidfeed_show_settings'); ?>
+            <?php submit_button(__('Show stored settings', 'masjidfeed-app'), 'secondary', 'submit', false); ?>
+        </form>
+        <p class="description" style="max-width:900px;"><?php esc_html_e('Lists exactly what is stored in the database. Secrets are partially masked, and a setting that is not listed is not stored at all — for example a missing gateway_site_id means this site never completed its push service registration.', 'masjidfeed-app'); ?></p>
+        <?php if (!is_array($snapshot)) {
+            return;
+        } ?>
+        <?php $settings = is_array($snapshot['settings'] ?? null) ? $snapshot['settings'] : array(); ?>
+        <table class="widefat striped" style="max-width:900px;">
+            <thead><tr><th style="width:35%;"><?php esc_html_e('Setting', 'masjidfeed-app'); ?></th><th><?php esc_html_e('Stored value', 'masjidfeed-app'); ?></th></tr></thead>
+            <tbody>
+                <?php if (!$settings) : ?>
+                    <tr><td colspan="2"><?php esc_html_e('Nothing is stored yet — every setting still has its default.', 'masjidfeed-app'); ?></td></tr>
+                <?php endif; ?>
+                <?php foreach ($settings as $key => $value) : ?>
+                    <tr>
+                        <td><code><?php echo esc_html((string) $key); ?></code></td>
+                        <td><?php $this->render_snapshot_value($value); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        <h4><?php esc_html_e('Related plugin state', 'masjidfeed-app'); ?></h4>
+        <table class="widefat striped" style="max-width:900px;">
+            <thead><tr><th style="width:35%;"><?php esc_html_e('Item', 'masjidfeed-app'); ?></th><th><?php esc_html_e('State', 'masjidfeed-app'); ?></th></tr></thead>
+            <tbody>
+                <?php
+                $companion = is_array($snapshot['companion'] ?? null) ? $snapshot['companion'] : array();
+                $rows = array(
+                    'gateway_site_id' => array(__('Push service site ID', 'masjidfeed-app'), null, null),
+                    'gateway_secret' => array(__('Push service secret', 'masjidfeed-app'), null, null),
+                    'gateway_challenge_stored' => array(__('Gateway proof challenge', 'masjidfeed-app'), __('stored', 'masjidfeed-app'), __('not stored', 'masjidfeed-app')),
+                    'gateway_fetch_token_stored' => array(__('Gateway fetch token', 'masjidfeed-app'), __('stored', 'masjidfeed-app'), __('not stored', 'masjidfeed-app')),
+                    'credential_encryption_available' => array(__('Credential encryption key', 'masjidfeed-app'), __('configured', 'masjidfeed-app'), __('not configured', 'masjidfeed-app')),
+                    'firebase_credentials_stored' => array(__('Firebase service account', 'masjidfeed-app'), __('stored', 'masjidfeed-app'), __('not stored', 'masjidfeed-app')),
+                    'api_trace_enabled' => array(__('API call tracing', 'masjidfeed-app'), __('enabled', 'masjidfeed-app'), __('disabled', 'masjidfeed-app')),
+                );
+                foreach ($rows as $key => $labels) :
+                    $value = $companion[$key] ?? null;
+                    if (null === $labels[1]) {
+                        // A plain value row: the site ID and the masked secret.
+                        $state = (string) $value;
+                        $state_html = '<code>' . esc_html('' !== $state ? $state : '—') . '</code>';
+                    } else {
+                        $state = true === $value ? $labels[1] : $labels[2];
+                        $state_html = esc_html($state);
+                    }
+                    ?>
+                    <tr>
+                        <td><?php echo esc_html($labels[0]); ?></td>
+                        <td><?php echo $state_html; // phpcs:ignore WordPress.Security.EscapeOutput -- built from esc_html/esc_code above. ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                <tr>
+                    <td><?php esc_html_e('Database version', 'masjidfeed-app'); ?></td>
+                    <td><code><?php echo esc_html((string) ($companion['database_version'] ?? '')); ?></code></td>
+                </tr>
+            </tbody>
+        </table>
+        <?php
+    }
+
+    private function render_snapshot_value($value) {
+        if (is_array($value)) {
+            echo '<pre style="margin:0;white-space:pre-wrap;">' . esc_html(wp_json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) . '</pre>';
+            return;
+        }
+        if (is_bool($value)) {
+            echo esc_html($value ? 'true' : 'false');
+            return;
+        }
+        if (null === $value) {
+            echo '<code>—</code>';
+            return;
+        }
+        echo '<code>' . esc_html((string) $value) . '</code>';
     }
 
     /**
