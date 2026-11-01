@@ -12,6 +12,7 @@ class SettingsPushTabTest extends TestCase {
         $GLOBALS['__test_wp_remote_requests'] = [];
         $GLOBALS['__test_wp_remote_request_responses'] = [];
         $GLOBALS['__test_password_counter'] = 0;
+        $GLOBALS['__test_submit_buttons'] = [];
     }
 
     private function render_push_tab(): string {
@@ -70,6 +71,52 @@ class SettingsPushTabTest extends TestCase {
         $html = $this->render_push_tab();
         $this->assertStringContainsString('Registered.', $html);
         $this->assertStringContainsString('site-1', $html);
+    }
+
+    public function test_push_tab_shows_pending_registration_with_validate_button(): void {
+        // A pending registration has a site ID but no secret yet: the gateway
+        // issued the ID but the one-time secret was never collected.
+        $this->store_settings(['gateway_site_id' => 'site-9']);
+
+        $html = $this->render_push_tab();
+
+        $this->assertStringContainsString('Pending.', $html);
+        $this->assertStringContainsString('site-9', $html);
+        $this->assertStringNotContainsString('Not registered.', $html);
+        // The rotation form is only rendered for completed registrations.
+        $this->assertStringNotContainsString('masjidfeed_rotate_gateway_topic', $html);
+        // The pending button retries verification (POST
+        // /v1/sites/{site_id}/verify with the stored fetch token) instead of
+        // registering again, and the description explains the retry.
+        $this->assertSame('Validate', $GLOBALS['__test_submit_buttons'][0]['text']);
+        $this->assertStringContainsString('gateway-verification', $html);
+        $this->assertStringContainsString('24 hours', $html);
+    }
+
+    public function test_push_tab_shows_register_button_when_not_pending(): void {
+        $this->render_push_tab();
+
+        $this->assertSame('Register with MasjidFeed', $GLOBALS['__test_submit_buttons'][0]['text']);
+
+        $this->store_settings(['gateway_site_id' => 'site-1', 'gateway_secret' => 'secret-1']);
+        $GLOBALS['__test_submit_buttons'] = [];
+        $this->render_push_tab();
+
+        // The registration button keeps its label once registered; the
+        // rotate button follows it.
+        $this->assertSame('Register with MasjidFeed', $GLOBALS['__test_submit_buttons'][0]['text']);
+        $this->assertSame('Rotate topic keys', $GLOBALS['__test_submit_buttons'][1]['text']);
+    }
+
+    public function test_gateway_pending_reflects_stored_state(): void {
+        $this->assertFalse(Masjid_Feed_Settings::is_gateway_pending());
+
+        $this->store_settings(['gateway_site_id' => 'site-9']);
+        $this->assertTrue(Masjid_Feed_Settings::is_gateway_pending());
+
+        $this->store_settings(['gateway_site_id' => 'site-9', 'gateway_secret' => 'secret-1']);
+        $this->assertFalse(Masjid_Feed_Settings::is_gateway_pending());
+        $this->assertTrue(Masjid_Feed_Settings::is_gateway_registered());
     }
 
     public function test_push_mode_defaults_to_masjidfeed_for_fresh_installs(): void {
@@ -283,6 +330,31 @@ class SettingsPushTabTest extends TestCase {
         $this->assertSame('test-challenge-2', $restart['fetch_token']);
         $this->assertArrayNotHasKey(Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION, $GLOBALS['__test_options']);
         $this->assertArrayNotHasKey(Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION, $GLOBALS['__test_options']);
+    }
+
+    public function test_url_claimed_pending_error_maps_to_actionable_notice(): void {
+        // A gateway 5xx after the pending site was committed leaves the site
+        // ID unknown to the plugin; the next registration then answers 400
+        // validation "url already registered and pending verification". The
+        // notice explains how the claim frees itself instead of echoing the
+        // raw gateway message.
+        $gateway_message = 'url already registered and pending verification; complete it via POST /v1/sites/{site_id}/verify or email masjidfeed@goodsoftware.foundation to have it revoked';
+        $exception = new Masjid_Feed_Gateway_Invalid_Request($gateway_message);
+        $exception->set_response_details(400, json_encode(['error' => ['code' => 'validation', 'message' => $gateway_message]]));
+
+        $settings = new Masjid_Feed_Settings();
+        $method = new ReflectionMethod(Masjid_Feed_Settings::class, 'gateway_registration_error_message');
+
+        $mapped = $method->invoke($settings, $exception);
+        $this->assertStringContainsString('24 hours', $mapped);
+        $this->assertStringContainsString('masjidfeed@goodsoftware.foundation', $mapped);
+        $this->assertStringNotContainsString($gateway_message, $mapped);
+
+        // Any other gateway error is surfaced verbatim.
+        $other_message = 'challenge is required: publish a one-time proof value';
+        $other = new Masjid_Feed_Gateway_Invalid_Request($other_message);
+        $other->set_response_details(400, json_encode(['error' => ['code' => 'validation', 'message' => $other_message]]));
+        $this->assertSame($other_message, $method->invoke($settings, $other));
     }
 
     public function test_push_tab_renders_topic_rotation_only_when_registered(): void {

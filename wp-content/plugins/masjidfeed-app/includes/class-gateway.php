@@ -111,17 +111,22 @@ class Masjid_Feed_Gateway {
      * and onboarding completes through verify_site() instead.
      */
     public function register_site(string $challenge, string $fetch_token): array {
+        $body = array(
+            'url' => home_url(),
+            'challenge' => $challenge,
+            'fetch_token' => $fetch_token,
+            'name' => (string) Masjid_Feed_Settings::get_option('masjid_name'),
+            'deep_link_prefix' => self::DEEP_LINK_PREFIX,
+        );
+        $location = $this->registration_location();
+        if (null !== $location) {
+            $body['location'] = $location;
+        }
         $data = $this->request(
             'POST',
             '/v1/sites',
             array(),
-            array(
-                'url' => home_url(),
-                'challenge' => $challenge,
-                'fetch_token' => $fetch_token,
-                'name' => (string) Masjid_Feed_Settings::get_option('masjid_name'),
-                'deep_link_prefix' => self::DEEP_LINK_PREFIX,
-            )
+            $body
         );
         if (empty($data['site_id'])) {
             throw new Masjid_Feed_Gateway_Exception(__('The push service returned an incomplete registration response.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
@@ -131,6 +136,31 @@ class Masjid_Feed_Gateway {
             'status' => (string) ($data['status'] ?? ''),
             'gateway_secret' => (string) ($data['gateway_secret'] ?? ''),
         );
+    }
+
+    /**
+     * The mosque coordinates registered with the Muslim Prayer Times plugin
+     * — the lat/lng settings its /wp-json/muslim-prayer-times/v1/salah-api
+     * endpoint exposes under "location". Sent as the optional registration
+     * "location" so the gateway knows where the masjid is. Returns null
+     * (and the field is omitted) when the plugin is absent, its coordinates
+     * are unset, or the values are outside the ranges the gateway accepts.
+     */
+    private function registration_location(): ?array {
+        $opts = get_option('muslprti_settings', array());
+        $opts = is_array($opts) ? $opts : array();
+        if (
+            !isset($opts['lat'], $opts['lng'])
+            || !is_numeric($opts['lat']) || !is_numeric($opts['lng'])
+        ) {
+            return null;
+        }
+        $latitude = (float) $opts['lat'];
+        $longitude = (float) $opts['lng'];
+        if ($latitude < -90 || $latitude > 90 || $longitude < -180 || $longitude > 180) {
+            return null;
+        }
+        return array('latitude' => $latitude, 'longitude' => $longitude);
     }
 
     /**

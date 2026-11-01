@@ -46,6 +46,41 @@ class GatewayClientTest extends TestCase {
         $this->assertSame('masjidapp://', $body['deep_link_prefix']);
     }
 
+    public function test_register_site_includes_prayer_times_location(): void {
+        $GLOBALS['__test_options']['muslprti_settings'] = ['lat' => 52.3702, 'lng' => 4.8952];
+        $gateway = $this->transport([
+            $this->response(201, ['site_id' => 'site-1', 'status' => 'active', 'gateway_secret' => 'secret-1']),
+        ]);
+
+        $gateway->register_site('challenge-1', 'token-1');
+
+        $body = json_decode($this->requests[0]['options']['body'], true);
+        $this->assertSame(['latitude' => 52.3702, 'longitude' => 4.8952], $body['location']);
+    }
+
+    public function test_register_site_omits_location_without_prayer_times_settings(): void {
+        $gateway = $this->transport([
+            $this->response(201, ['site_id' => 'site-1', 'status' => 'active', 'gateway_secret' => 'secret-1']),
+        ]);
+
+        $gateway->register_site('challenge-1', 'token-1');
+
+        $body = json_decode($this->requests[0]['options']['body'], true);
+        $this->assertArrayNotHasKey('location', $body);
+    }
+
+    public function test_register_site_omits_out_of_range_location(): void {
+        $GLOBALS['__test_options']['muslprti_settings'] = ['lat' => 91, 'lng' => 4.8952];
+        $gateway = $this->transport([
+            $this->response(201, ['site_id' => 'site-1', 'status' => 'active', 'gateway_secret' => 'secret-1']),
+        ]);
+
+        $gateway->register_site('challenge-1', 'token-1');
+
+        $body = json_decode($this->requests[0]['options']['body'], true);
+        $this->assertArrayNotHasKey('location', $body);
+    }
+
     public function test_register_site_returns_pending_without_secret(): void {
         $gateway = $this->transport([
             $this->response(201, ['site_id' => 'site-1', 'status' => 'pending', 'verification_url' => 'https://example.test/wp-json/masjid/v1/gateway-verification']),

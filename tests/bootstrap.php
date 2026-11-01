@@ -498,6 +498,7 @@ if (!function_exists('settings_fields')) {
 
 if (!function_exists('submit_button')) {
     function submit_button($text = null, $type = 'primary', $name = 'submit', $wrap = true, $other_attributes = null) {
+        $GLOBALS['__test_submit_buttons'][] = array('text' => $text, 'type' => $type, 'name' => $name);
     }
 }
 

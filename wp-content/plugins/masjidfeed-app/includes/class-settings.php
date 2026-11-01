@@ -100,6 +100,20 @@ class Masjid_Feed_Settings {
     }
 
     /**
+     * True when a gateway registration is in progress: the gateway issued a
+     * site ID for the pending site but the one-time secret has not been
+     * collected yet. Pressing the registration button — labelled Validate in
+     * this state — retries verification with the stored fetch token
+     * (POST /v1/sites/{site_id}/verify, wp-plugin-integration.md §3.3).
+     */
+    public static function is_gateway_pending() {
+        $opts = get_option(MASJIDFEED_OPTION_KEY, array());
+        $opts = is_array($opts) ? $opts : array();
+        return '' !== (string) ($opts['gateway_site_id'] ?? '')
+            && '' === (string) ($opts['gateway_secret'] ?? '');
+    }
+
+    /**
      * Compute default values sourced from existing WordPress site settings.
      */
     public static function get_defaults() {
@@ -667,12 +681,15 @@ class Masjid_Feed_Settings {
 
         <h3><?php esc_html_e('MasjidFeed push service', 'masjidfeed-app'); ?></h3>
         <p class="description" style="max-width:900px;"><?php esc_html_e('Delivers notifications through the hosted MasjidFeed gateway, which holds the Firebase credentials for the MasjidApp apps. Registering verifies this site\'s domain and stores the issued secret in the settings; no Firebase project of your own is required.', 'masjidfeed-app'); ?></p>
+        <?php $pending = self::is_gateway_pending(); ?>
         <table class="form-table" role="presentation">
             <tr>
                 <th scope="row"><?php esc_html_e('Registration', 'masjidfeed-app'); ?></th>
                 <td>
                     <?php if (self::is_gateway_registered()) : ?>
                         <p><strong><?php esc_html_e('Registered.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html((string) self::get_option('gateway_site_id')); ?></code></p>
+                    <?php elseif ($pending) : ?>
+                        <p><strong><?php esc_html_e('Pending.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html((string) self::get_option('gateway_site_id')); ?></code></p>
                     <?php else : ?>
                         <p><strong><?php esc_html_e('Not registered.', 'masjidfeed-app'); ?></strong></p>
                     <?php endif; ?>
@@ -682,8 +699,14 @@ class Masjid_Feed_Settings {
         <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
             <input type="hidden" name="action" value="masjidfeed_register_gateway" />
             <?php wp_nonce_field('masjidfeed_register_gateway'); ?>
-            <p><?php submit_button(__('Register with MasjidFeed', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
-            <p class="description" style="max-width:900px;"><?php esc_html_e('Registration publishes a one-time challenge at the gateway-verification REST endpoint, served only to the push service when it presents this registration’s fetch token; the service fetches it to verify this domain and issues the secret stored in the settings. If the service cannot reach this site, registration stays pending and pressing the button again retries verification.', 'masjidfeed-app'); ?></p>
+            <p><?php submit_button($pending ? __('Validate', 'masjidfeed-app') : __('Register with MasjidFeed', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
+            <p class="description" style="max-width:900px;"><?php
+                if ($pending) {
+                    esc_html_e('Registration is pending: the push service could not verify this site\'s domain when it registered. Make sure the WordPress REST API is publicly reachable, then press Validate to retry — the push service re-fetches the challenge from the gateway-verification endpoint using this registration\'s fetch token (POST /v1/sites/{site_id}/verify). The pending registration expires 24 hours after it was created.', 'masjidfeed-app');
+                } else {
+                    esc_html_e('Registration publishes a one-time challenge at the gateway-verification REST endpoint, served only to the push service when it presents this registration’s fetch token; the service fetches it to verify this domain and issues the secret stored in the settings. If the service cannot reach this site, registration stays pending and pressing the button again retries verification.', 'masjidfeed-app');
+                }
+            ?></p>
         </form>
         <?php if (self::is_gateway_registered()) : ?>
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
@@ -1035,7 +1058,10 @@ class Masjid_Feed_Settings {
         try {
             $result = $this->register_with_gateway();
         } catch (Throwable $exception) {
-            $this->redirect_with_notice(rawurlencode(substr($exception->getMessage(), 0, 300)), 'error', 'push');
+            $message = $exception instanceof Masjid_Feed_Gateway_Exception
+                ? $this->gateway_registration_error_message($exception)
+                : $exception->getMessage();
+            $this->redirect_with_notice(rawurlencode(substr($message, 0, 300)), 'error', 'push');
         }
         if ('pending' === $result['state']) {
             $this->redirect_with_notice(rawurlencode(__('The push service could not verify this site\'s domain during registration. Registration is pending: make sure the WordPress REST API is publicly reachable, then press Register again to retry.', 'masjidfeed-app')), 'error', 'push');
@@ -1049,6 +1075,25 @@ class Masjid_Feed_Settings {
             'success',
             'push'
         );
+    }
+
+    /**
+     * Map a gateway exception from the registration flow to an admin notice
+     * message. The gateway's own message is shown verbatim, except when the
+     * URL claim is stuck pending: the gateway still holds the pending
+     * registration an earlier attempt created, but this site no longer knows
+     * its site ID (that attempt failed before the ID was stored), so the
+     * claim frees itself only when the 24-hour challenge expires — or the
+     * gateway operator revokes it from the admin UI.
+     */
+    private function gateway_registration_error_message(Masjid_Feed_Gateway_Exception $exception): string {
+        $message = $exception->getMessage();
+        if (400 === $exception->http_status()
+            && 'validation' === $exception->error_code()
+            && false !== strpos($message, 'url already registered and pending verification')) {
+            return __('The push service already has a pending registration for this site URL, but this site can no longer complete it because that registration was interrupted. Wait for the pending registration to expire (24 hours) and press Register again, or email masjidfeed@goodsoftware.foundation to have it revoked sooner.', 'masjidfeed-app');
+        }
+        return $message;
     }
 
     public function handle_validate_gateway() {
