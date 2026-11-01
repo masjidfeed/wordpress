@@ -9,6 +9,7 @@
  *  - GET /announcements  Announcements (regular WordPress posts)
  *  - GET /posts/{id}     A published post with optional event fields
  *  - GET /parking-config Parking map zones and event schedules
+ *  - GET /gateway-verification Challenge served while the push gateway verifies this site's domain
  */
 
 if (!defined('ABSPATH')) { exit; }
@@ -33,6 +34,7 @@ class Masjid_Feed_REST_API {
     const PARKING_SHARED_CACHE_TTL = HOUR_IN_SECONDS;
 
     private $authorized_firebase;
+    private $gateway_client;
 
     public function __construct() {
         add_action('rest_api_init', array($this, 'register_routes'));
@@ -144,8 +146,99 @@ class Masjid_Feed_REST_API {
                 'args' => $this->get_push_registration_args(false),
             ),
         ));
+
+        register_rest_route(self::NAMESPACE_, '/gateway-verification', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'get_gateway_verification'),
+            'permission_callback' => '__return_true',
+        ));
     }
 
+    public function register_push_token($request) {
+        $mode = Masjid_Feed_Settings::push_mode();
+        $app_check_token = trim((string) $request->get_header('x-firebase-appcheck'));
+        $response = array('registered' => true);
+        $attempts = 0;
+        $failures = array();
+
+        if (in_array($mode, array(Masjid_Feed_Settings::PUSH_MODE_MASJIDFEED, Masjid_Feed_Settings::PUSH_MODE_BOTH), true)) {
+            $attempts++;
+            try {
+                $response['topicKey'] = $this->gateway_client()->issue_topic_key($app_check_token);
+            } catch (Masjid_Feed_Gateway_Exception $exception) {
+                $failures[] = $this->gateway_error($exception, 'masjidfeed_topic_key_failed', __('The push service did not issue a topic key.', 'masjidfeed-app'));
+            }
+        }
+
+        if (in_array($mode, array(Masjid_Feed_Settings::PUSH_MODE_FCM, Masjid_Feed_Settings::PUSH_MODE_BOTH), true)
+            && $this->authorized_firebase instanceof Masjid_Feed_Firebase) {
+            $attempts++;
+            $token = trim((string) $request->get_param('token'));
+            $previous_token = trim((string) $request->get_param('previousToken'));
+            if ('' === $token) {
+                $failures[] = new WP_Error('masjidfeed_fcm_token_required', __('An FCM token is required to register for push notifications.', 'masjidfeed-app'), array('status' => 400));
+            } else {
+                try {
+                    $result = $this->authorized_firebase->subscribe($token);
+                    if ($previous_token && !hash_equals($token, $previous_token)) {
+                        $this->authorized_firebase->unsubscribe($previous_token);
+                    }
+                    $response['result'] = $this->summarize_topic_result($result);
+                } catch (Throwable $exception) {
+                    $error = new WP_Error('masjidfeed_firebase_registration_failed', __('The device could not be registered for push notifications.', 'masjidfeed-app'), array('status' => 502));
+                    $error->add_data($this->firebase_failure_diagnostics($exception, array($token, $previous_token)), 'masjidfeed_firebase_registration_failed');
+                    $failures[] = $error;
+                }
+            }
+        }
+
+        if ($failures && count($failures) === $attempts) {
+            return $failures[0];
+        }
+        return new WP_REST_Response($response, 200);
+    }
+
+    public function unregister_push_token($request) {
+        // Topic subscriptions are managed client-side against the
+        // gateway-issued topic; without a local Firebase configuration there
+        // is nothing to unregister server-side.
+        if (!($this->authorized_firebase instanceof Masjid_Feed_Firebase)) {
+            return new WP_REST_Response(array('registered' => false), 200);
+        }
+        $token = trim((string) $request->get_param('token'));
+        try {
+            $result = $this->authorized_firebase->unsubscribe($token);
+            return new WP_REST_Response(array('registered' => false, 'result' => $this->summarize_topic_result($result)), 200);
+        } catch (Throwable $exception) {
+            $error = new WP_Error('masjidfeed_firebase_unregistration_failed', __('The device could not be unregistered from push notifications.', 'masjidfeed-app'), array('status' => 502));
+            $error->add_data($this->firebase_failure_diagnostics($exception, array($token)), 'masjidfeed_firebase_unregistration_failed');
+            return $error;
+        }
+    }
+
+    /**
+     * Lazily built gateway client; replaceable in tests via reflection.
+     */
+    private function gateway_client() {
+        if (null === $this->gateway_client) {
+            $this->gateway_client = new Masjid_Feed_Gateway();
+        }
+        return $this->gateway_client;
+    }
+
+    /**
+     * Map a gateway exception to a REST error with a sensible status code.
+     */
+    private function gateway_error(Masjid_Feed_Gateway_Exception $exception, $code, $fallback_message) {
+        $status = $exception->http_status();
+        if (403 === $status) {
+            $status = 503; // the site is not active on the gateway.
+        } elseif (!in_array($status, array(401, 404, 429), true)) {
+            $status = 502;
+        }
+        $message = '' !== $exception->getMessage() ? $exception->getMessage() : $fallback_message;
+        return new WP_Error($code, $message, array('status' => $status));
+    }
     /**
      * GET /config
      */
@@ -202,7 +295,7 @@ class Masjid_Feed_REST_API {
                 'prayerReminders' => (bool) $opts['feature_prayer_reminders'],
             ),
             'pushNotifications' => array(
-                'enabled' => (bool) $opts['push_enabled'],
+                'enabled' => Masjid_Feed_Settings::PUSH_MODE_DISABLED !== Masjid_Feed_Settings::push_mode(),
                 'configured' => Masjid_Feed_Credential_Store::has_credentials()
                     && !empty($opts['firebase_ios_config'])
                     && !empty($opts['firebase_android_config']),
@@ -431,32 +524,37 @@ class Masjid_Feed_REST_API {
         return $this->cache_response($request, $cache_key, $data, self::POST_SHARED_CACHE_TTL);
     }
 
-    public function register_push_token($request) {
-        $token = trim((string) $request->get_param('token'));
-        $previous_token = trim((string) $request->get_param('previousToken'));
-        try {
-            $result = $this->authorized_firebase->subscribe($token);
-            if ($previous_token && !hash_equals($token, $previous_token)) {
-                $this->authorized_firebase->unsubscribe($previous_token);
-            }
-            return new WP_REST_Response(array('registered' => true, 'result' => $this->summarize_topic_result($result)), 200);
-        } catch (Throwable $exception) {
-            $error = new WP_Error('masjidfeed_firebase_registration_failed', __('The device could not be registered for push notifications.', 'masjidfeed-app'), array('status' => 502));
-            $error->add_data($this->firebase_failure_diagnostics($exception, array($token, $previous_token)), 'masjidfeed_firebase_registration_failed');
-            return $error;
+    /**
+     * GET /gateway-verification
+     *
+     * Serves the one-time proof challenge the push gateway fetches to verify
+     * this site's domain during registration — but only to callbacks
+     * carrying the registrant's fetch token (X-MasjidFeed-Fetch-Token). The
+     * challenge is never publicly readable: a registration is only in
+     * progress while the challenge and fetch token options exist, and any
+     * callback without the matching token is refused with 401 so a
+     * squatting registration is rejected on its own callback. The endpoint
+     * answers 404 at all other times.
+     */
+    public function get_gateway_verification($request) {
+        $challenge = get_option(Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION, '');
+        $fetch_token = get_option(Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION, '');
+        if (!is_string($challenge) || '' === $challenge || !is_string($fetch_token) || '' === $fetch_token) {
+            return new WP_Error(
+                'masjidfeed_gateway_challenge_missing',
+                __('No push service registration is in progress for this site.', 'masjidfeed-app'),
+                array('status' => 404)
+            );
         }
-    }
-
-    public function unregister_push_token($request) {
-        $token = trim((string) $request->get_param('token'));
-        try {
-            $result = $this->authorized_firebase->unsubscribe($token);
-            return new WP_REST_Response(array('registered' => false, 'result' => $this->summarize_topic_result($result)), 200);
-        } catch (Throwable $exception) {
-            $error = new WP_Error('masjidfeed_firebase_unregistration_failed', __('The device could not be unregistered from push notifications.', 'masjidfeed-app'), array('status' => 502));
-            $error->add_data($this->firebase_failure_diagnostics($exception, array($token)), 'masjidfeed_firebase_unregistration_failed');
-            return $error;
+        $presented = (string) $request->get_header('x-masjidfeed-fetch-token');
+        if ('' === $presented || !hash_equals($fetch_token, $presented)) {
+            return new WP_Error(
+                'masjidfeed_gateway_verification_forbidden',
+                __('The push service verification fetch did not present this registration’s fetch token.', 'masjidfeed-app'),
+                array('status' => 401)
+            );
         }
+        return array('challenge' => $challenge);
     }
 
     private function firebase_failure_diagnostics($exception, array $secrets = array()) {
@@ -483,7 +581,7 @@ class Masjid_Feed_REST_API {
     }
 
     public function authorize_push_registration($request) {
-        if (!Masjid_Feed_Settings::get_option('push_enabled')) {
+        if (Masjid_Feed_Settings::PUSH_MODE_DISABLED === Masjid_Feed_Settings::push_mode()) {
             return new WP_Error('masjidfeed_push_disabled', __('Push notifications are disabled.', 'masjidfeed-app'), array('status' => 503));
         }
         if (!hash_equals((string) Masjid_Feed_Settings::get_option('masjid_id'), (string) $request->get_param('masjidId'))) {
@@ -497,11 +595,23 @@ class Masjid_Feed_REST_API {
         if ('' === $app_check_token) {
             return new WP_Error('masjidfeed_app_check_required', __('A Firebase App Check token is required.', 'masjidfeed-app'), array('status' => 401));
         }
+        $mode = Masjid_Feed_Settings::push_mode();
+        if (Masjid_Feed_Settings::PUSH_MODE_MASJIDFEED === $mode) {
+            // The gateway verifies the App Check token against the central
+            // Firebase project when the topic key is requested.
+            return true;
+        }
+
         $firebase_config = Masjid_Feed_Settings::get_public_firebase_config();
         $platform = (string) $request->get_param('platform');
         $platform_app_id = $firebase_config[$platform]['appId'] ?? '';
         if ('' === $platform_app_id) {
-            return new WP_Error('masjidfeed_firebase_not_configured', __('Firebase mobile application configuration is incomplete.', 'masjidfeed-app'), array('status' => 503));
+            if (Masjid_Feed_Settings::PUSH_MODE_FCM === $mode) {
+                return new WP_Error('masjidfeed_firebase_not_configured', __('Firebase mobile application configuration is incomplete.', 'masjidfeed-app'), array('status' => 503));
+            }
+            // Both mode without an FCM configuration: deliver through the
+            // gateway half only.
+            return true;
         }
         try {
             $this->authorized_firebase = new Masjid_Feed_Firebase();
@@ -742,8 +852,11 @@ class Masjid_Feed_REST_API {
         $args = array(
             'masjidId' => array('required' => true, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field'),
             'platform' => array('required' => true, 'type' => 'string', 'enum' => array('ios', 'android')),
+            // Optional at the route level: MasjidFeed mode registers through
+            // the gateway topic key and needs no token. The FCM half enforces
+            // it when it runs.
             'token' => array(
-                'required' => true,
+                'required' => false,
                 'type' => 'string',
                 'sanitize_callback' => function($value) { return trim((string) $value); },
                 'validate_callback' => function($value) { return is_string($value) && strlen($value) >= 20 && strlen($value) <= 4096; },

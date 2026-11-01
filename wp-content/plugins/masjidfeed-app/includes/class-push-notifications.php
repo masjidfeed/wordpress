@@ -114,12 +114,12 @@ class Masjid_Feed_Push_Notifications {
 
         try {
             $payload = json_decode($job->payload, true, 512, JSON_THROW_ON_ERROR);
-            $result = (new Masjid_Feed_Firebase())->send_topic($payload);
+            $message_id = $this->send_payload($payload);
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- status transition on the custom queue table.
             $wpdb->update($table, array(
                 'status' => 'sent',
                 'attempts' => (int) $job->attempts + 1,
-                'firebase_message_id' => sanitize_text_field($result['name'] ?? ''),
+                'firebase_message_id' => sanitize_text_field($message_id),
                 'error_message' => null,
                 'sent_at' => current_time('mysql', true),
                 'updated_at' => current_time('mysql', true),
@@ -195,7 +195,7 @@ class Masjid_Feed_Push_Notifications {
     }
 
     private function post_is_eligible($post_id) {
-        if (!Masjid_Feed_Settings::get_option('push_enabled')) {
+        if (Masjid_Feed_Settings::PUSH_MODE_DISABLED === Masjid_Feed_Settings::push_mode()) {
             return false;
         }
         $tag_id = absint(Masjid_Feed_Settings::get_option('push_tag'));
@@ -250,14 +250,62 @@ class Masjid_Feed_Push_Notifications {
     }
 
     private function is_retryable($exception) {
-        return $exception instanceof Masjid_Feed_Firebase_Exception && $exception->is_retryable();
+        if ($exception instanceof Masjid_Feed_Firebase_Exception) {
+            return $exception->is_retryable();
+        }
+        return $exception instanceof Masjid_Feed_Gateway_Exception && $exception->is_retryable();
     }
 
     private function get_retry_delay($exception, $attempts) {
-        $retry_after = $exception instanceof Masjid_Feed_Firebase_Exception ? $exception->retry_after() : null;
+        $retry_after = null;
+        if ($exception instanceof Masjid_Feed_Firebase_Exception || $exception instanceof Masjid_Feed_Gateway_Exception) {
+            $retry_after = $exception->retry_after();
+        }
         if ($retry_after && $retry_after > 0) {
             return max(MINUTE_IN_SECONDS, $retry_after);
         }
         return min(HOUR_IN_SECONDS, (2 ** $attempts) * MINUTE_IN_SECONDS);
+    }
+
+    /**
+     * Deliver one payload over every channel the selected push mode calls
+     * for. The job counts as sent when at least one channel succeeds; it is
+     * only a failure (and eligible for retry) when all channels failed.
+     */
+    private function send_payload(array $payload): string {
+        $mode = Masjid_Feed_Settings::push_mode();
+        $channels = array();
+        if (in_array($mode, array(Masjid_Feed_Settings::PUSH_MODE_MASJIDFEED, Masjid_Feed_Settings::PUSH_MODE_BOTH), true)) {
+            $channels[] = 'gateway';
+        }
+        if (in_array($mode, array(Masjid_Feed_Settings::PUSH_MODE_FCM, Masjid_Feed_Settings::PUSH_MODE_BOTH), true)) {
+            $channels[] = 'fcm';
+        }
+        if (!$channels) {
+            // push_enabled is derived from the mode, so this is defensive only.
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+            throw new RuntimeException(__('Push notifications are disabled.', 'masjidfeed-app'));
+        }
+
+        $message_id = '';
+        $failures = array();
+        foreach ($channels as $channel) {
+            try {
+                if ('gateway' === $channel) {
+                    $send_id = (string) (new Masjid_Feed_Gateway())->send($payload);
+                } else {
+                    $send_id = (string) ((new Masjid_Feed_Firebase())->send_topic($payload)['name'] ?? '');
+                }
+                if ('' === $message_id) {
+                    $message_id = $send_id;
+                }
+            } catch (Throwable $exception) {
+                $failures[] = $exception;
+            }
+        }
+        if (count($failures) === count($channels)) {
+            throw $failures[0];
+        }
+        return $message_id;
     }
 }

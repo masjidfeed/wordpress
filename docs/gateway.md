@@ -45,12 +45,21 @@ instead.
 
 ## 1. Onboarding
 
-1. Org installs the plugin; the plugin exposes a verification resource at
-   `masjid/v1/gateway-verification` containing a challenge value from the
-   signup form.
+1. Org installs the plugin; the plugin generates a one-time challenge value
+   **plus a random fetch token** at signup and serves the challenge at
+   `masjid/v1/gateway-verification` — but only to callbacks presenting the
+   fetch token (`X-MasjidFeed-Fetch-Token` header), so the proof value is
+   never publicly readable.
 2. Admin selects whether to use MasjidFeed push notifications or custom Firebase settings.
-3. When MasjidFeed push notifications are enabled, the plugin calls the gateway to register; the gateway calls back the site URL to verify domain ownership and issues a `gateway_secret`; the secret is stored encrypted in the plugin.
+3. When MasjidFeed push notifications are enabled, the plugin calls the gateway to register (submitting both challenge and fetch token); the gateway calls back the site URL with the fetch token to verify domain ownership and issues a `gateway_secret`; the secret is stored encrypted in the plugin. The fetch token also authorizes the verify retry endpoint, so only the registering party can collect the secret. A registration the site's plugin refuses (wrong token) is torn down immediately instead of squatting the URL.
 4. The gateway stores the `gateway_secret_hash` along with a generated a per-site **topic secret**: `site_id → url, gateway_secret_hash, topic_secret` — per-*org* state, never per-device.
+
+> Design revision: the original text had the resource serve "a challenge
+> value from the signup form" unconditionally — a publicly readable proof,
+> which let a poller race the legitimate onboarding (security audit A2–A4).
+> The fetch token binds the proof to the registering party. See
+> `push-gateway/docs/security-audit.md` (rev 3) and
+> `push-gateway/docs/wp-plugin-integration.md` for the implemented contract.
 
 ## 2. Topic key issuance (app → gateway)
 

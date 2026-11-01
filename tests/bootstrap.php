@@ -34,10 +34,25 @@ if (!function_exists('is_wp_error')) {
 if (!function_exists('wp_remote_request')) {
     function wp_remote_request($url, $args = array()) {
         $GLOBALS['__test_wp_remote_requests'][] = ['url' => $url, 'args' => $args];
+        if (!empty($GLOBALS['__test_wp_remote_request_responses'])) {
+            return array_shift($GLOBALS['__test_wp_remote_request_responses']);
+        }
         if (isset($GLOBALS['__test_wp_remote_request_response'])) {
             return $GLOBALS['__test_wp_remote_request_response'];
         }
         return new WP_Error('http_request_failed', 'No HTTP transport available in tests.');
+    }
+}
+
+if (!function_exists('wp_generate_password')) {
+    function wp_generate_password($length = 12, $special_chars = true, $extra_special_chars = false) {
+        // Deterministic sequence: the first generated value is the challenge
+        // the gateway tests assert on; later ones (e.g. the fetch token)
+        // are suffixed so the two secrets differ.
+        $GLOBALS['__test_password_counter'] = ($GLOBALS['__test_password_counter'] ?? 0) + 1;
+        return $GLOBALS['__test_password_counter'] === 1
+            ? 'test-challenge'
+            : 'test-challenge-' . $GLOBALS['__test_password_counter'];
     }
 }
 
@@ -72,6 +87,9 @@ class WP_Error {
     public function get_error_code() {
         return $this->message ? $this->message : '';
     }
+    public function add_data($data, $code = '') {
+        return $this;
+    }
 }
 
 if (!defined('DAY_IN_SECONDS')) {
@@ -88,6 +106,7 @@ $GLOBALS['__test_rest_requests'] = [];
 $GLOBALS['__test_settings_errors'] = [];
 $GLOBALS['__test_transients'] = [];
 $GLOBALS['__test_wp_remote_requests'] = [];
+$GLOBALS['__test_wp_remote_request_responses'] = [];
 
 // The Events Calendar plugin stubs: makes that event source "active" in tests.
 if (!class_exists('Tribe__Events__Main')) {
@@ -493,6 +512,12 @@ if (!function_exists('add_options_page')) {
     }
 }
 
+if (!function_exists('wp_nonce_field')) {
+    function wp_nonce_field($action = -1, $name = '_wpnonce', $referer = true, $echo = true) {
+        return '';
+    }
+}
+
 if (!function_exists('admin_url')) {
     function admin_url($path = '') {
         return home_url('/wp-admin/' . ltrim($path, '/'));
@@ -525,6 +550,7 @@ require_once $plugin_dir . '/includes/class-firebase-exceptions.php';
 require_once $plugin_dir . '/includes/class-firebase-client.php';
 require_once $plugin_dir . '/includes/class-credential-store.php';
 require_once $plugin_dir . '/includes/class-firebase.php';
+require_once $plugin_dir . '/includes/class-gateway.php';
 require_once $plugin_dir . '/includes/class-push-notifications.php';
 require_once $plugin_dir . '/includes/class-api-trace.php';
 require_once $plugin_dir . '/includes/class-legacy-settings-migrator.php';

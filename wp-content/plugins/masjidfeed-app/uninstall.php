@@ -9,6 +9,8 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
 
 delete_option('masjidfeed_settings');
 delete_option('masjidfeed_firebase_credentials');
+delete_option('masjidfeed_gateway_challenge');
+delete_option('masjidfeed_gateway_fetch_token');
 delete_option('masjidfeed_api_trace_enabled');
 delete_option('masjidfeed_api_trace_entries');
 delete_option('masjidfeed_db_version');

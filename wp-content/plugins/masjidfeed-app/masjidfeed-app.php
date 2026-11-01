@@ -89,6 +89,7 @@ class Masjid_Feed_Plugin {
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-firebase-exceptions.php';
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-firebase-client.php';
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-firebase.php';
+        require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-gateway.php';
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-push-notifications.php';
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-api-trace.php';
         require_once MASJIDFEED_PLUGIN_DIR . 'includes/class-legacy-settings-migrator.php';

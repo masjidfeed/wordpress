@@ -1,0 +1,382 @@
+<?php
+/**
+ * Client for the hosted MasjidFeed push gateway (masjidfeed-app.gsf8.org).
+ *
+ * The gateway is the sole holder of the Firebase project service account.
+ * Sites self-register (register → serve challenge → verify) and then send
+ * topic notifications with the per-site gateway secret. See
+ * docs/gateway.md and push-gateway/README.md for the endpoint contracts.
+ */
+
+if (!defined('ABSPATH')) { exit; }
+
+class Masjid_Feed_Gateway_Exception extends RuntimeException {
+
+    private $retry_after;
+    private $http_status = 0;
+    private $response_body = '';
+    private $error_code = '';
+
+    public function __construct($message = '', $code = 0, ?Throwable $previous = null, ?int $retry_after = null) {
+        parent::__construct($message, $code, $previous);
+        $this->retry_after = $retry_after;
+    }
+
+    public function is_retryable(): bool {
+        return false;
+    }
+
+    public function retry_after(): ?int {
+        return $this->retry_after;
+    }
+
+    public function set_response_details(int $http_status, string $response_body): void {
+        $this->http_status = $http_status;
+        $this->response_body = substr($response_body, 0, 2000);
+        // The gateway's error envelope is {"error": {"code", "message"}} and
+        // the code (not the status) distinguishes payloads that share a
+        // status, e.g. 400 validation vs 400 verification_failed, or the two
+        // 429 rate_limit / daily_quota reasons.
+        $decoded = json_decode($response_body, true);
+        $code = is_array($decoded) ? ($decoded['error']['code'] ?? null) : null;
+        $this->error_code = is_string($code) ? $code : '';
+    }
+
+    public function http_status(): int {
+        return $this->http_status;
+    }
+
+    public function response_body(): string {
+        return $this->response_body;
+    }
+
+    public function error_code(): string {
+        return $this->error_code;
+    }
+}
+
+class Masjid_Feed_Gateway_Connection_Failed extends Masjid_Feed_Gateway_Exception {
+    public function is_retryable(): bool {
+        return true;
+    }
+}
+
+class Masjid_Feed_Gateway_Invalid_Request extends Masjid_Feed_Gateway_Exception {
+}
+
+class Masjid_Feed_Gateway_Authentication_Error extends Masjid_Feed_Gateway_Exception {
+}
+
+class Masjid_Feed_Gateway_Not_Found extends Masjid_Feed_Gateway_Exception {
+}
+
+class Masjid_Feed_Gateway_Forbidden extends Masjid_Feed_Gateway_Exception {
+}
+
+class Masjid_Feed_Gateway_Rate_Limited extends Masjid_Feed_Gateway_Exception {
+    public function is_retryable(): bool {
+        return true;
+    }
+}
+
+class Masjid_Feed_Gateway_Server_Error extends Masjid_Feed_Gateway_Exception {
+    public function is_retryable(): bool {
+        return true;
+    }
+}
+
+class Masjid_Feed_Gateway {
+
+    const GATEWAY_URL = 'https://masjidfeed-app.gsf8.org';
+    const REQUEST_TIMEOUT = 30;
+    // The gateway only delivers deep links that start with the prefix
+    // registered for the site. The plugin registers the MasjidApp URI scheme
+    // and only saves deep-link templates that use it.
+    const DEEP_LINK_PREFIX = 'masjidapp://';
+
+    private $transport;
+
+    public function __construct(?callable $transport = null) {
+        $this->transport = $transport ?? array($this, 'wordpress_transport');
+    }
+
+    /**
+     * Register this site with the gateway. The plugin stores a one-time
+     * proof challenge plus a random fetch token before calling this; the
+     * gateway fetches the challenge by callback — presenting the fetch
+     * token in the X-MasjidFeed-Fetch-Token header, which the verification
+     * endpoint requires — and, on match, activates the site and returns the
+     * gateway secret (shown exactly once) in the same response. When the
+     * callback fails the site stays pending: the response carries no secret
+     * and onboarding completes through verify_site() instead.
+     */
+    public function register_site(string $challenge, string $fetch_token): array {
+        $data = $this->request(
+            'POST',
+            '/v1/sites',
+            array(),
+            array(
+                'url' => home_url(),
+                'challenge' => $challenge,
+                'fetch_token' => $fetch_token,
+                'name' => (string) Masjid_Feed_Settings::get_option('masjid_name'),
+                'deep_link_prefix' => self::DEEP_LINK_PREFIX,
+            )
+        );
+        if (empty($data['site_id'])) {
+            throw new Masjid_Feed_Gateway_Exception(__('The push service returned an incomplete registration response.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+        }
+        return array(
+            'site_id' => (string) $data['site_id'],
+            'status' => (string) ($data['status'] ?? ''),
+            'gateway_secret' => (string) ($data['gateway_secret'] ?? ''),
+        );
+    }
+
+    /**
+     * Retry path for a pending site whose registration callback failed: the
+     * gateway re-fetches the challenge from the site's verification endpoint
+     * (presenting the fetch token) and returns the gateway secret (shown
+     * exactly once) on match. Only the party holding the fetch token — this
+     * site's plugin — can complete verification.
+     */
+    public function verify_site(string $site_id, string $fetch_token): array {
+        $data = $this->request(
+            'POST',
+            '/v1/sites/' . rawurlencode($site_id) . '/verify',
+            array(),
+            array('fetch_token' => $fetch_token)
+        );
+        if (empty($data['site_id'])) {
+            throw new Masjid_Feed_Gateway_Exception(__('The push service returned an incomplete verification response.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+        }
+        return array(
+            'site_id' => (string) $data['site_id'],
+            'status' => (string) ($data['status'] ?? ''),
+            'gateway_secret' => (string) ($data['gateway_secret'] ?? ''),
+        );
+    }
+
+    /**
+     * Proxy the app's topic-key request to the gateway. The gateway verifies
+     * the App Check token against the central Firebase project and returns
+     * the canonical topic the app subscribes to client-side.
+     */
+    public function issue_topic_key(string $app_check_token): array {
+        $site_id = (string) Masjid_Feed_Settings::get_option('gateway_site_id');
+        if ('' === $site_id) {
+            throw new Masjid_Feed_Gateway_Exception(__('This site is not registered with the MasjidFeed push service.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+        }
+        $data = $this->request(
+            'POST',
+            '/v1/topic-key',
+            array('X-Firebase-AppCheck' => $app_check_token),
+            array('site_id' => $site_id)
+        );
+        if (empty($data['topic'])) {
+            throw new Masjid_Feed_Gateway_Exception(__('The push service returned no topic key.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+        }
+        return $data;
+    }
+
+    /**
+     * Send one notification through the gateway. Accepts the payload shape
+     * built by Masjid_Feed_Push_Notifications::build_payload() and returns
+     * the send_id (the FCM message name).
+     */
+    public function send(array $payload): string {
+        $site_id = (string) Masjid_Feed_Settings::get_option('gateway_site_id');
+        $secret = (string) Masjid_Feed_Settings::get_option('gateway_secret');
+        if ('' === $site_id || '' === $secret) {
+            throw new Masjid_Feed_Gateway_Exception(__('This site is not registered with the MasjidFeed push service.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+        }
+        $title = (string) ($payload['title'] ?? '');
+        // The gateway rejects titles over 100 bytes, so cut on a character
+        // boundary and append an ellipsis that keeps the total within limit.
+        if (strlen($title) > 100) {
+            $title = (function_exists('mb_strcut') ? mb_strcut($title, 0, 97) : substr($title, 0, 97)) . '…';
+        }
+        $body = (string) ($payload['body'] ?? '');
+        // Bodies are capped at 300 bytes at the gateway; the queue builds
+        // them with a character-based excerpt, so a multibyte body can
+        // still exceed the byte limit and is cut here on a char boundary.
+        if (strlen($body) > 300) {
+            $body = (function_exists('mb_strcut') ? mb_strcut($body, 0, 297) : substr($body, 0, 297)) . '…';
+        }
+        $data = $this->request(
+            'POST',
+            '/v1/sites/' . rawurlencode($site_id) . '/messages',
+            array('Authorization' => 'Bearer ' . $secret),
+            array(
+                'notification_id' => (string) ($payload['data']['notificationId'] ?? ''),
+                'title' => $title,
+                'body' => $body,
+                'deep_link' => (string) ($payload['data']['deepLink'] ?? ''),
+            )
+        );
+        $send_id = (string) ($data['send_id'] ?? '');
+        if ('' === $send_id) {
+            throw new Masjid_Feed_Gateway_Exception(__('The push service returned no send ID.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+        }
+        return $send_id;
+    }
+
+    /**
+     * Debug tool: verify this site's credentials with the gateway without
+     * sending anything. Returns true when the secret is valid and the site
+     * is active; anything else throws.
+     */
+    public function validate_connection(): bool {
+        $data = $this->authorized_request('POST', '/validate', null);
+        return !empty($data['ok']);
+    }
+
+    /**
+     * Rotate this site's topic keys: the gateway issues a new topic secret
+     * and bumps the version. Devices pick up the new topic on their next
+     * topic-key fetch, and sends keep fanning out to the previous version
+     * for the rotation grace window. Returns the new topic version.
+     */
+    public function rotate_topic(): int {
+        $data = $this->authorized_request('POST', '/rotate', null);
+        if (!isset($data['topic_version'])) {
+            throw new Masjid_Feed_Gateway_Exception(__('The push service returned no topic version.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+        }
+        return (int) $data['topic_version'];
+    }
+
+    /**
+     * Fetch this site's registration audit entries from the gateway (most
+     * recent first, capped at 50).
+     */
+    public function site_audit(): array {
+        $entries = $this->authorized_request('GET', '/audit', null);
+        return is_array($entries) ? $entries : array();
+    }
+
+    /**
+     * Look up the FCM message record for a send this site made. The gateway
+     * strips the topic field (it contains the per-site topic secret) before
+     * responding, and 404s when the send never happened or aged out of
+     * FCM's retention. The send_id is an FCM message name and may contain
+     * slashes, so it is appended to the path verbatim.
+     */
+    public function send_status(string $send_id): array {
+        $send_id = trim($send_id);
+        if ('' === $send_id || preg_match('/[?#]/', $send_id)) {
+            throw new Masjid_Feed_Gateway_Invalid_Request(__('The stored send ID is not a valid message name.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+        }
+        return $this->authorized_request('GET', '/messages/' . $send_id, null);
+    }
+
+    /**
+     * Call a bearer-authenticated site endpoint: /validate, /rotate,
+     * /audit, or /messages/... under /v1/sites/{site_id}. Requires a
+     * completed registration; $body is omitted for the GET endpoints.
+     */
+    private function authorized_request(string $method, string $suffix, ?array $body): array {
+        $site_id = (string) Masjid_Feed_Settings::get_option('gateway_site_id');
+        $secret = (string) Masjid_Feed_Settings::get_option('gateway_secret');
+        if ('' === $site_id || '' === $secret) {
+            throw new Masjid_Feed_Gateway_Exception(__('This site is not registered with the MasjidFeed push service.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+        }
+        return $this->request(
+            $method,
+            '/v1/sites/' . rawurlencode($site_id) . $suffix,
+            array('Authorization' => 'Bearer ' . $secret),
+            $body
+        );
+    }
+
+    /**
+     * Send an HTTP request to a gateway endpoint, returning the decoded
+     * JSON response body. $headers carries the endpoint's authentication
+     * (e.g. a bearer token or App Check token) and may be empty:
+     * registration is validated by callback to the registered URL instead.
+     * $body is JSON-encoded and omitted when null.
+     */
+    private function request(string $method, string $path, array $headers, ?array $body = null): array {
+        $options = array(
+            'timeout' => self::REQUEST_TIMEOUT,
+            'headers' => $headers + array(
+                'Content-Type' => 'application/json; charset=utf-8',
+            ),
+        );
+        if (null !== $body) {
+            $encoded = wp_json_encode($body);
+            if (!is_string($encoded)) {
+                throw new Masjid_Feed_Gateway_Invalid_Request(__('The notification payload could not be encoded.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+            }
+            $options['body'] = $encoded;
+        }
+        try {
+            $response = ($this->transport)($method, self::GATEWAY_URL . $path, $options);
+        } catch (Throwable $exception) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+            throw new Masjid_Feed_Gateway_Connection_Failed($exception->getMessage());
+        }
+        $status = (int) ($response['status'] ?? 0);
+        $raw = (string) ($response['body'] ?? '');
+        $headers = is_array($response['headers'] ?? null) ? $response['headers'] : array();
+        $data = json_decode($raw, true);
+        if (200 <= $status && $status < 300 && is_array($data)) {
+            return $data;
+        }
+        // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+        throw $this->error_for_status($status, $raw, $headers);
+    }
+
+    private function error_for_status(int $status, string $body, array $headers = array()): Masjid_Feed_Gateway_Exception {
+        $decoded = json_decode($body, true);
+        $message = is_array($decoded) ? (string) ($decoded['error']['message'] ?? '') : '';
+        if ('' === $message) {
+            $message = sprintf('The push service returned HTTP %d.', $status);
+        }
+        $classes = array(
+            400 => Masjid_Feed_Gateway_Invalid_Request::class,
+            401 => Masjid_Feed_Gateway_Authentication_Error::class,
+            403 => Masjid_Feed_Gateway_Forbidden::class,
+            404 => Masjid_Feed_Gateway_Not_Found::class,
+            410 => Masjid_Feed_Gateway_Invalid_Request::class,
+            429 => Masjid_Feed_Gateway_Rate_Limited::class,
+        );
+        $class = $classes[$status] ?? Masjid_Feed_Gateway_Server_Error::class;
+        $retry_after = 429 === $status ? $this->retry_after_header($headers) : null;
+        $exception = new $class($message, 0, null, $retry_after);
+        $exception->set_response_details($status, $body);
+        return $exception;
+    }
+
+    private function retry_after_header(array $headers): ?int {
+        $value = '';
+        foreach ($headers as $name => $header_value) {
+            if (is_string($name) && strtolower($name) === 'retry-after') {
+                $value = is_array($header_value) ? (string) reset($header_value) : (string) $header_value;
+                break;
+            }
+        }
+        return '' !== $value && is_numeric($value) ? max(0, (int) $value) : null;
+    }
+
+    /**
+     * Default transport built on the WordPress HTTP API. Same return shape
+     * as Masjid_Feed_Firebase_Client::wordpress_transport().
+     */
+    public function wordpress_transport(string $method, string $url, array $options): array {
+        $options['method'] = $method;
+        $response = wp_remote_request($url, $options);
+        if (is_wp_error($response)) {
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+            throw new Masjid_Feed_Gateway_Connection_Failed($response->get_error_message());
+        }
+        $headers = array();
+        foreach ((array) ($response['headers'] ?? array()) as $name => $value) {
+            $headers[strtolower((string) $name)] = $value;
+        }
+        return array(
+            'status' => (int) ($response['response']['code'] ?? 0),
+            'headers' => $headers,
+            'body' => (string) ($response['body'] ?? ''),
+        );
+    }
+}

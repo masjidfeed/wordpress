@@ -18,11 +18,24 @@ class Masjid_Feed_Settings {
     const PARKING_SCRIPT_URL = 'https://github.com/masjidfeed/wordpress/blob/main/parking-api/parking-geojson-to-config.py';
     const PAGE_SLUG = 'masjidfeed-app-settings';
     const VIEW_NONCE_ACTION = 'masjidfeed_settings_view';
+    const GATEWAY_CHALLENGE_OPTION = 'masjidfeed_gateway_challenge';
+    const GATEWAY_FETCH_TOKEN_OPTION = 'masjidfeed_gateway_fetch_token';
+    const GATEWAY_AUDIT_TRANSIENT = 'masjidfeed_gateway_audit';
+    const GATEWAY_SEND_STATUS_TRANSIENT = 'masjidfeed_gateway_send_status';
+    const PUSH_MODE_DISABLED = 'disabled';
+    const PUSH_MODE_MASJIDFEED = 'masjidfeed';
+    const PUSH_MODE_FCM = 'fcm';
+    const PUSH_MODE_BOTH = 'both';
 
     public function __construct() {
         add_action('admin_menu', array($this, 'add_settings_page'));
         add_action('admin_init', array($this, 'register_settings'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_media_scripts'));
+        add_action('admin_post_masjidfeed_register_gateway', array($this, 'handle_register_gateway'));
+        add_action('admin_post_masjidfeed_validate_gateway', array($this, 'handle_validate_gateway'));
+        add_action('admin_post_masjidfeed_rotate_gateway_topic', array($this, 'handle_rotate_gateway_topic'));
+        add_action('admin_post_masjidfeed_fetch_gateway_audit', array($this, 'handle_fetch_gateway_audit'));
+        add_action('admin_post_masjidfeed_gateway_send_status', array($this, 'handle_gateway_send_status'));
         add_action('admin_post_masjidfeed_validate_firebase', array($this, 'handle_validate_firebase'));
         add_action('admin_post_masjidfeed_test_push', array($this, 'handle_test_push'));
         add_action('admin_post_masjidfeed_toggle_api_tracing', array($this, 'handle_toggle_api_tracing'));
@@ -50,6 +63,40 @@ class Masjid_Feed_Settings {
     public static function get_all_options() {
         $settings = get_option(MASJIDFEED_OPTION_KEY, array());
         return array_merge(self::get_defaults(), $settings);
+    }
+
+    /**
+     * Effective push delivery mode. Reads the raw stored option (not the
+     * defaults-merged array) so installs saved before the mode dropdown
+     * existed keep their behaviour: the old checkbox only controlled custom
+     * FCM delivery. Fresh installs default to the hosted MasjidFeed service.
+     *
+     * @param array|null $opts Raw stored settings; read from the option when null.
+     */
+    public static function push_mode($opts = null) {
+        if (!is_array($opts)) {
+            $stored = get_option(MASJIDFEED_OPTION_KEY, array());
+            $opts = is_array($stored) ? $stored : array();
+        }
+        $mode = (string) ($opts['push_mode'] ?? '');
+        if (in_array($mode, array(self::PUSH_MODE_DISABLED, self::PUSH_MODE_MASJIDFEED, self::PUSH_MODE_FCM, self::PUSH_MODE_BOTH), true)) {
+            return $mode;
+        }
+        if (array_key_exists('push_enabled', $opts)) {
+            return !empty($opts['push_enabled']) ? self::PUSH_MODE_FCM : self::PUSH_MODE_DISABLED;
+        }
+        return self::PUSH_MODE_MASJIDFEED;
+    }
+
+    /**
+     * True when a site has registered with the push gateway and holds the
+     * secret sends are authenticated with.
+     */
+    public static function is_gateway_registered() {
+        $opts = get_option(MASJIDFEED_OPTION_KEY, array());
+        $opts = is_array($opts) ? $opts : array();
+        return '' !== (string) ($opts['gateway_site_id'] ?? '')
+            && '' !== (string) ($opts['gateway_secret'] ?? '');
     }
 
     /**
@@ -86,6 +133,8 @@ class Masjid_Feed_Settings {
             'announcements_tags' => array(),
             'friday_announcements_category' => 0,
             'push_enabled' => 0,
+            'push_mode' => self::PUSH_MODE_MASJIDFEED,
+            'gateway_site_id' => '',
             'push_tag' => 0,
             'push_deep_link_template' => '',
             'firebase_project_id' => '',
@@ -162,7 +211,21 @@ class Masjid_Feed_Settings {
         wp_enqueue_script('wp-color-picker');
         wp_add_inline_script('media-editor', $this->media_picker_js());
         wp_add_inline_script('media-editor', $this->events_source_js());
+        wp_add_inline_script('media-editor', $this->push_mode_js());
         wp_add_inline_script('wp-color-picker', $this->color_picker_js());
+    }
+
+    private function push_mode_js() {
+        return "jQuery(function(\$) {\n"
+            . "    var mode = \$('#masjidfeed_push_mode');\n"
+            . "    var section = \$('#masjidfeed_fcm_setup');\n"
+            . "    function sync() {\n"
+            . "        var value = mode.val();\n"
+            . "        section.prop('open', 'fcm' === value || 'both' === value);\n"
+            . "    }\n"
+            . "    mode.on('change', sync);\n"
+            . "    sync();\n"
+            . "});";
     }
 
     private function events_source_js() {
@@ -300,7 +363,14 @@ class Masjid_Feed_Settings {
     private function sanitize_push_settings($input, $existing) {
         $out = $existing;
 
-        $out['push_enabled'] = !empty($input['push_enabled']) ? 1 : 0;
+        $mode = sanitize_key(wp_unslash($input['push_mode'] ?? ''));
+        if (!in_array($mode, array(self::PUSH_MODE_DISABLED, self::PUSH_MODE_MASJIDFEED, self::PUSH_MODE_FCM, self::PUSH_MODE_BOTH), true)) {
+            $mode = self::push_mode($existing);
+        }
+        $out['push_mode'] = $mode;
+        // Legacy consumers (queue gating, /config, device registration) keep
+        // reading push_enabled, so derive it from the selected mode.
+        $out['push_enabled'] = self::PUSH_MODE_DISABLED === $mode ? 0 : 1;
         $out['push_tag'] = absint($input['push_tag'] ?? 0);
         $out['push_deep_link_template'] = $this->sanitize_deep_link_template(
             $input['push_deep_link_template'] ?? '',
@@ -357,6 +427,7 @@ class Masjid_Feed_Settings {
                 $this->render_parking_tab();
             } elseif ('debug' === $current_tab) {
                 $this->render_api_trace_tools();
+                $this->render_gateway_tools();
                 $this->render_firebase_tools();
                 $this->render_validation_results();
                 $this->render_recent_deliveries();
@@ -589,71 +660,57 @@ class Masjid_Feed_Settings {
     }
 
     private function render_push_tab($opts, $tags) {
+        $mode = self::push_mode();
+        $fcm_section_open = in_array($mode, array(self::PUSH_MODE_FCM, self::PUSH_MODE_BOTH), true);
         ?>
+        <h2 id="push-notifications"><?php esc_html_e('Push Notifications', 'masjidfeed-app'); ?></h2>
+
+        <h3><?php esc_html_e('MasjidFeed push service', 'masjidfeed-app'); ?></h3>
+        <p class="description" style="max-width:900px;"><?php esc_html_e('Delivers notifications through the hosted MasjidFeed gateway, which holds the Firebase credentials for the MasjidApp apps. Registering verifies this site\'s domain and stores the issued secret in the settings; no Firebase project of your own is required.', 'masjidfeed-app'); ?></p>
+        <table class="form-table" role="presentation">
+            <tr>
+                <th scope="row"><?php esc_html_e('Registration', 'masjidfeed-app'); ?></th>
+                <td>
+                    <?php if (self::is_gateway_registered()) : ?>
+                        <p><strong><?php esc_html_e('Registered.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html((string) self::get_option('gateway_site_id')); ?></code></p>
+                    <?php else : ?>
+                        <p><strong><?php esc_html_e('Not registered.', 'masjidfeed-app'); ?></strong></p>
+                    <?php endif; ?>
+                </td>
+            </tr>
+        </table>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+            <input type="hidden" name="action" value="masjidfeed_register_gateway" />
+            <?php wp_nonce_field('masjidfeed_register_gateway'); ?>
+            <p><?php submit_button(__('Register with MasjidFeed', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
+            <p class="description" style="max-width:900px;"><?php esc_html_e('Registration publishes a one-time challenge at the gateway-verification REST endpoint, served only to the push service when it presents this registration’s fetch token; the service fetches it to verify this domain and issues the secret stored in the settings. If the service cannot reach this site, registration stays pending and pressing the button again retries verification.', 'masjidfeed-app'); ?></p>
+        </form>
+        <?php if (self::is_gateway_registered()) : ?>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <input type="hidden" name="action" value="masjidfeed_rotate_gateway_topic" />
+                <?php wp_nonce_field('masjidfeed_rotate_gateway_topic'); ?>
+                <p><?php submit_button(__('Rotate topic keys', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
+                <p class="description" style="max-width:900px;"><?php esc_html_e('Rotating makes the push service issue a new topic for this site and stop delivering to the old one after a grace window. Use this when a topic key may have leaked: devices re-subscribe automatically the next time they fetch a topic key (keys expire after 12 hours).', 'masjidfeed-app'); ?></p>
+            </form>
+        <?php endif; ?>
+
         <form method="post" action="options.php" enctype="multipart/form-data">
             <?php settings_fields(self::PUSH_OPTION_GROUP); ?>
             <input type="hidden" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[_tab]" value="push" />
 
-            <h2 id="push-notifications"><?php esc_html_e('Push Notifications', 'masjidfeed-app'); ?></h2>
-            <p class="description"><?php esc_html_e('Configure Firebase Cloud Messaging for this tenant. Uploaded credentials are validated and the service account is encrypted before storage.', 'masjidfeed-app'); ?></p>
-            <?php if (!Masjid_Feed_Credential_Store::is_available()) : ?>
-                <div class="notice notice-warning inline">
-                    <p><strong><?php esc_html_e('Credential encryption is not configured.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Set MASJIDFEED_CREDENTIAL_KEY as described below before uploading the service-account file.', 'masjidfeed-app'); ?></p>
-                </div>
-            <?php elseif (Masjid_Feed_Credential_Store::has_credentials() && is_wp_error(Masjid_Feed_Credential_Store::get())) : ?>
-                <div class="notice notice-error inline">
-                    <p><strong><?php esc_html_e('Stored Firebase credentials cannot be decrypted.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Restore the original MASJIDFEED_CREDENTIAL_KEY or upload the service-account JSON again after intentional key rotation.', 'masjidfeed-app'); ?></p>
-                </div>
-            <?php endif; ?>
-            <details style="max-width:900px;margin:16px 0;">
-                <summary><strong><?php esc_html_e('Required files and server configuration', 'masjidfeed-app'); ?></strong></summary>
-                <div style="padding:8px 0 0 20px;">
-                    <h3><?php esc_html_e('Create the Firebase apps', 'masjidfeed-app'); ?></h3>
-                    <ol>
-                        <li><?php esc_html_e('Open Firebase Console. Create a project named MasjidApp, or open the project already used by MasjidApp.', 'masjidfeed-app'); ?></li>
-                        <li><?php esc_html_e('From Project Overview, choose Add app → Apple. Enter com.goodsoftware.masjidapp for Apple bundle ID and MasjidApp for App nickname. Register the app and download GoogleService-Info.plist.', 'masjidfeed-app'); ?></li>
-                        <li><?php esc_html_e('Return to Project Overview and choose Add app → Android. Enter com.goodsoftware.masjidapp for Android package name and MasjidApp for App nickname. Register the app and download google-services.json.', 'masjidfeed-app'); ?></li>
-                    </ol>
-                    <p><strong><?php esc_html_e('Use these exact identifiers.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Firebase cannot change a bundle ID or package name after registration. If an existing app uses another identifier, add a new app.', 'masjidfeed-app'); ?></p>
-
-                    <h3><?php esc_html_e('Configure push delivery', 'masjidfeed-app'); ?></h3>
-                    <ol>
-                        <li><?php esc_html_e('In Firebase, open Project settings → Cloud Messaging. Under Apple app configuration, upload the APNs authentication key from the Apple Developer account and enter its Key ID and Team ID.', 'masjidfeed-app'); ?></li>
-                        <li><?php esc_html_e('Open Project settings → Service accounts → Firebase Admin SDK. Choose Generate new private key, confirm, and keep the downloaded JSON file private.', 'masjidfeed-app'); ?></li>
-                    </ol>
-
-                    <h3><?php esc_html_e('Enable Firebase App Check', 'masjidfeed-app'); ?></h3>
-                    <p><?php esc_html_e('Complete these cloud-side steps once for each Firebase project and registered app, not once for each WordPress server. If every tenant uses masjidapp-bcfc7 and its existing Apple and Android apps, the setup applies to all of those servers. Repeat it only when a server uses a different Firebase project or app registration.', 'masjidfeed-app'); ?></p>
-                    <ol>
-                        <li><?php esc_html_e('In Google Cloud Console for the Firebase project, enable the Firebase App Check API.', 'masjidfeed-app'); ?></li>
-                        <li><?php esc_html_e('In Firebase, open Security → App Check → Apps. Select the Apple app and register it with the App Attest provider.', 'masjidfeed-app'); ?></li>
-                        <li><?php esc_html_e('In Google Play Console, open Release → App integrity → Play Integrity API and link this Firebase project. Copy the production app-signing SHA-256 fingerprint.', 'masjidfeed-app'); ?></li>
-                        <li><?php esc_html_e('Return to Firebase App Check, select the Android app, choose Play Integrity, and enter the production SHA-256 fingerprint.', 'masjidfeed-app'); ?></li>
-                        <li><?php esc_html_e('Ask the mobile app developer to enable the App Check SDK in both apps and send its token in the X-Firebase-AppCheck header. Without this header, device registration is rejected.', 'masjidfeed-app'); ?></li>
-                    </ol>
-                    <p><?php esc_html_e('For test devices or simulators, the app developer must use the App Check debug provider. Add its debug token from App Check → Apps → Manage debug tokens, and never use that token in a production build.', 'masjidfeed-app'); ?></p>
-
-                    <h3><?php esc_html_e('Server encryption key', 'masjidfeed-app'); ?></h3>
-                    <p><?php esc_html_e('Generate one persistent random value on the WordPress server:', 'masjidfeed-app'); ?></p>
-                    <pre><code>openssl rand -base64 48</code></pre>
-                    <p><?php esc_html_e('Set the result as MASJIDFEED_CREDENTIAL_KEY in the environment used by PHP, then restart PHP or the WordPress container. The plugin reads this environment variable directly.', 'masjidfeed-app'); ?></p>
-                    <pre><code>MASJIDFEED_CREDENTIAL_KEY='generated-value'</code></pre>
-                    <p><?php esc_html_e('If the host cannot provide environment variables, define the value in wp-config.php before the stop-editing line:', 'masjidfeed-app'); ?></p>
-                    <pre><code>define('MASJIDFEED_CREDENTIAL_KEY', 'generated-value');</code></pre>
-                    <p><strong><?php esc_html_e('Store this key in deployment secret management, not in the database or source control, and preserve it across deployments.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('If it is lost or changed, upload the service-account JSON again after configuring the replacement key.', 'masjidfeed-app'); ?></p>
-
-                    <h3><?php esc_html_e('Finish setup', 'masjidfeed-app'); ?></h3>
-                    <ol>
-                        <li><?php esc_html_e('Upload the service-account JSON, iOS plist, and Android google-services JSON below. All files must use the same Firebase project ID.', 'masjidfeed-app'); ?></li>
-                        <li><?php esc_html_e('Save settings, choose Validate connection, then paste a current device FCM token and send a test notification.', 'masjidfeed-app'); ?></li>
-                        <li><?php esc_html_e('For reliable queued delivery, configure the host scheduler to invoke WordPress cron instead of relying only on site traffic.', 'masjidfeed-app'); ?></li>
-                    </ol>
-                </div>
-            </details>
+            <h3><?php esc_html_e('Delivery', 'masjidfeed-app'); ?></h3>
             <table class="form-table" role="presentation">
                 <tr>
-                    <th scope="row"><?php esc_html_e('Enable push notifications', 'masjidfeed-app'); ?></th>
-                    <td><label><input type="checkbox" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[push_enabled]" value="1" <?php checked(!empty($opts['push_enabled'])); ?> /> <?php esc_html_e('Register devices and send notifications', 'masjidfeed-app'); ?></label></td>
+                    <th scope="row"><label for="masjidfeed_push_mode"><?php esc_html_e('Push notifications', 'masjidfeed-app'); ?></label></th>
+                    <td>
+                        <select id="masjidfeed_push_mode" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[push_mode]">
+                            <option value="<?php echo esc_attr(self::PUSH_MODE_DISABLED); ?>" <?php selected($mode, self::PUSH_MODE_DISABLED); ?>><?php esc_html_e('Disabled', 'masjidfeed-app'); ?></option>
+                            <option value="<?php echo esc_attr(self::PUSH_MODE_MASJIDFEED); ?>" <?php selected($mode, self::PUSH_MODE_MASJIDFEED); ?>><?php esc_html_e('MasjidFeed', 'masjidfeed-app'); ?></option>
+                            <option value="<?php echo esc_attr(self::PUSH_MODE_FCM); ?>" <?php selected($mode, self::PUSH_MODE_FCM); ?>><?php esc_html_e('FCM', 'masjidfeed-app'); ?></option>
+                            <option value="<?php echo esc_attr(self::PUSH_MODE_BOTH); ?>" <?php selected($mode, self::PUSH_MODE_BOTH); ?>><?php esc_html_e('Both', 'masjidfeed-app'); ?></option>
+                        </select>
+                        <p class="description"><?php esc_html_e('MasjidFeed delivers through the hosted push service registered above. FCM delivers through your own Firebase project configured below. Both delivers through both channels.', 'masjidfeed-app'); ?></p>
+                    </td>
                 </tr>
                 <tr>
                     <th scope="row"><label for="masjidfeed_push_tag"><?php esc_html_e('Trigger tag', 'masjidfeed-app'); ?></label></th>
@@ -671,30 +728,90 @@ class Masjid_Feed_Settings {
                     <th scope="row"><label for="masjidfeed_push_deep_link_template"><?php esc_html_e('Deep-link override', 'masjidfeed-app'); ?></label></th>
                     <td>
                         <input type="text" id="masjidfeed_push_deep_link_template" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[push_deep_link_template]" value="<?php echo esc_attr($opts['push_deep_link_template']); ?>" class="large-text code" placeholder="masjidapp://open/v1/masjids/{masjidId}/{type}/{postId}" />
-                        <p class="description"><?php esc_html_e('Optional. Supports {masjidId}, {postId}, {type}, and {slug}. Any URI scheme is allowed; leave blank for the built-in event or announcement link.', 'masjidfeed-app'); ?></p>
+                        <p class="description"><?php esc_html_e('Optional. Supports {masjidId}, {postId}, {type}, and {slug}. Must use the masjidapp:// URI scheme; leave blank for the built-in event or announcement link.', 'masjidfeed-app'); ?></p>
                     </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="masjidfeed_service_account"><?php esc_html_e('Service account JSON', 'masjidfeed-app'); ?></label></th>
-                    <td>
-                        <input type="file" id="masjidfeed_service_account" name="masjidfeed_service_account" accept="application/json,.json" />
-                        <p class="description"><?php echo Masjid_Feed_Credential_Store::has_credentials() ? esc_html__('Configured. Upload another file to rotate it.', 'masjidfeed-app') : esc_html__('Not configured.', 'masjidfeed-app'); ?></p>
-                        <?php if (Masjid_Feed_Credential_Store::has_credentials()) : ?><label><input type="checkbox" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[remove_firebase_credentials]" value="1" /> <?php esc_html_e('Remove stored service account', 'masjidfeed-app'); ?></label><?php endif; ?>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="masjidfeed_ios_config"><?php esc_html_e('iOS Firebase plist', 'masjidfeed-app'); ?></label></th>
-                    <td><input type="file" id="masjidfeed_ios_config" name="masjidfeed_ios_config" accept="application/xml,.plist" /><p class="description"><?php echo !empty($opts['firebase_ios_config']) ? esc_html__('Configured.', 'masjidfeed-app') : esc_html__('Not configured.', 'masjidfeed-app'); ?></p></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="masjidfeed_android_config"><?php esc_html_e('Android google-services.json', 'masjidfeed-app'); ?></label></th>
-                    <td><input type="file" id="masjidfeed_android_config" name="masjidfeed_android_config" accept="application/json,.json" /><p class="description"><?php echo !empty($opts['firebase_android_config']) ? esc_html__('Configured.', 'masjidfeed-app') : esc_html__('Not configured.', 'masjidfeed-app'); ?></p></td>
-                </tr>
-                <tr>
-                    <th scope="row"><?php esc_html_e('Firebase project', 'masjidfeed-app'); ?></th>
-                    <td><code><?php echo esc_html($opts['firebase_project_id'] ?: __('Not configured', 'masjidfeed-app')); ?></code><p class="description"><?php esc_html_e('All three uploaded files must belong to this project.', 'masjidfeed-app'); ?></p></td>
                 </tr>
             </table>
+
+            <details id="masjidfeed_fcm_setup" style="max-width:900px;margin:16px 0;"<?php echo $fcm_section_open ? ' open' : ''; ?>>
+                <summary><strong><?php esc_html_e('Custom Firebase (FCM) setup', 'masjidfeed-app'); ?></strong></summary>
+                <div style="padding:8px 0 0 20px;">
+                    <p class="description"><?php esc_html_e('Configure Firebase Cloud Messaging for this tenant. Uploaded credentials are validated and the service account is encrypted before storage.', 'masjidfeed-app'); ?></p>
+                    <?php if (!Masjid_Feed_Credential_Store::is_available()) : ?>
+                        <div class="notice notice-warning inline">
+                            <p><strong><?php esc_html_e('Credential encryption is not configured.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Set MASJIDFEED_CREDENTIAL_KEY as described below before uploading the service-account file.', 'masjidfeed-app'); ?></p>
+                        </div>
+                    <?php elseif (Masjid_Feed_Credential_Store::has_credentials() && is_wp_error(Masjid_Feed_Credential_Store::get())) : ?>
+                        <div class="notice notice-error inline">
+                            <p><strong><?php esc_html_e('Stored Firebase credentials cannot be decrypted.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Restore the original MASJIDFEED_CREDENTIAL_KEY or upload the service-account JSON again after intentional key rotation.', 'masjidfeed-app'); ?></p>
+                        </div>
+                    <?php endif; ?>
+                    <table class="form-table" role="presentation">
+                        <tr>
+                            <th scope="row"><label for="masjidfeed_service_account"><?php esc_html_e('Service account JSON', 'masjidfeed-app'); ?></label></th>
+                            <td>
+                                <input type="file" id="masjidfeed_service_account" name="masjidfeed_service_account" accept="application/json,.json" />
+                                <p class="description"><?php echo Masjid_Feed_Credential_Store::has_credentials() ? esc_html__('Configured. Upload another file to rotate it.', 'masjidfeed-app') : esc_html__('Not configured.', 'masjidfeed-app'); ?></p>
+                                <?php if (Masjid_Feed_Credential_Store::has_credentials()) : ?><label><input type="checkbox" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[remove_firebase_credentials]" value="1" /> <?php esc_html_e('Remove stored service account', 'masjidfeed-app'); ?></label><?php endif; ?>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="masjidfeed_ios_config"><?php esc_html_e('iOS Firebase plist', 'masjidfeed-app'); ?></label></th>
+                            <td><input type="file" id="masjidfeed_ios_config" name="masjidfeed_ios_config" accept="application/xml,.plist" /><p class="description"><?php echo !empty($opts['firebase_ios_config']) ? esc_html__('Configured.', 'masjidfeed-app') : esc_html__('Not configured.', 'masjidfeed-app'); ?></p></td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="masjidfeed_android_config"><?php esc_html_e('Android google-services.json', 'masjidfeed-app'); ?></label></th>
+                            <td><input type="file" id="masjidfeed_android_config" name="masjidfeed_android_config" accept="application/json,.json" /><p class="description"><?php echo !empty($opts['firebase_android_config']) ? esc_html__('Configured.', 'masjidfeed-app') : esc_html__('Not configured.', 'masjidfeed-app'); ?></p></td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><?php esc_html_e('Firebase project', 'masjidfeed-app'); ?></th>
+                            <td><code><?php echo esc_html($opts['firebase_project_id'] ?: __('Not configured', 'masjidfeed-app')); ?></code><p class="description"><?php esc_html_e('All three uploaded files must belong to this project.', 'masjidfeed-app'); ?></p></td>
+                        </tr>
+                    </table>
+
+                    <h3><?php esc_html_e('Required files and server configuration', 'masjidfeed-app'); ?></h3>
+                    <h4><?php esc_html_e('Create the Firebase apps', 'masjidfeed-app'); ?></h4>
+                    <ol>
+                        <li><?php esc_html_e('Open Firebase Console. Create a project named MasjidApp, or open the project already used by MasjidApp.', 'masjidfeed-app'); ?></li>
+                        <li><?php esc_html_e('From Project Overview, choose Add app → Apple. Enter com.goodsoftware.masjidapp for Apple bundle ID and MasjidApp for App nickname. Register the app and download GoogleService-Info.plist.', 'masjidfeed-app'); ?></li>
+                        <li><?php esc_html_e('Return to Project Overview and choose Add app → Android. Enter com.goodsoftware.masjidapp for Android package name and MasjidApp for App nickname. Register the app and download google-services.json.', 'masjidfeed-app'); ?></li>
+                    </ol>
+                    <p><strong><?php esc_html_e('Use these exact identifiers.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Firebase cannot change a bundle ID or package name after registration. If an existing app uses another identifier, add a new app.', 'masjidfeed-app'); ?></p>
+
+                    <h4><?php esc_html_e('Configure push delivery', 'masjidfeed-app'); ?></h4>
+                    <ol>
+                        <li><?php esc_html_e('In Firebase, open Project settings → Cloud Messaging. Under Apple app configuration, upload the APNs authentication key from the Apple Developer account and enter its Key ID and Team ID.', 'masjidfeed-app'); ?></li>
+                        <li><?php esc_html_e('Open Project settings → Service accounts → Firebase Admin SDK. Choose Generate new private key, confirm, and keep the downloaded JSON file private.', 'masjidfeed-app'); ?></li>
+                    </ol>
+
+                    <h4><?php esc_html_e('Enable Firebase App Check', 'masjidfeed-app'); ?></h4>
+                    <p><?php esc_html_e('Complete these cloud-side steps once for each Firebase project and registered app, not once for each WordPress server. If every tenant uses masjidapp-bcfc7 and its existing Apple and Android apps, the setup applies to all of those servers. Repeat it only when a server uses a different Firebase project or app registration.', 'masjidfeed-app'); ?></p>
+                    <ol>
+                        <li><?php esc_html_e('In Google Cloud Console for the Firebase project, enable the Firebase App Check API.', 'masjidfeed-app'); ?></li>
+                        <li><?php esc_html_e('In Firebase, open Security → App Check → Apps. Select the Apple app and register it with the App Attest provider.', 'masjidfeed-app'); ?></li>
+                        <li><?php esc_html_e('In Google Play Console, open Release → App integrity → Play Integrity API and link this Firebase project. Copy the production app-signing SHA-256 fingerprint.', 'masjidfeed-app'); ?></li>
+                        <li><?php esc_html_e('Return to Firebase App Check, select the Android app, choose Play Integrity, and enter the production SHA-256 fingerprint.', 'masjidfeed-app'); ?></li>
+                        <li><?php esc_html_e('Ask the mobile app developer to enable the App Check SDK in both apps and send its token in the X-Firebase-AppCheck header. Without this header, device registration is rejected.', 'masjidfeed-app'); ?></li>
+                    </ol>
+                    <p><?php esc_html_e('For test devices or simulators, the app developer must use the App Check debug provider. Add its debug token from App Check → Apps → Manage debug tokens, and never use that token in a production build.', 'masjidfeed-app'); ?></p>
+
+                    <h4><?php esc_html_e('Server encryption key', 'masjidfeed-app'); ?></h4>
+                    <p><?php esc_html_e('Generate one persistent random value on the WordPress server:', 'masjidfeed-app'); ?></p>
+                    <pre><code>openssl rand -base64 48</code></pre>
+                    <p><?php esc_html_e('Set the result as MASJIDFEED_CREDENTIAL_KEY in the environment used by PHP, then restart PHP or the WordPress container. The plugin reads this environment variable directly.', 'masjidfeed-app'); ?></p>
+                    <pre><code>MASJIDFEED_CREDENTIAL_KEY='generated-value'</code></pre>
+                    <p><?php esc_html_e('If the host cannot provide environment variables, define the value in wp-config.php before the stop-editing line:', 'masjidfeed-app'); ?></p>
+                    <pre><code>define('MASJIDFEED_CREDENTIAL_KEY', 'generated-value');</code></pre>
+                    <p><strong><?php esc_html_e('Store this key in deployment secret management, not in the database or source control, and preserve it across deployments.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('If it is lost or changed, upload the service-account JSON again after configuring the replacement key.', 'masjidfeed-app'); ?></p>
+
+                    <h4><?php esc_html_e('Finish setup', 'masjidfeed-app'); ?></h4>
+                    <ol>
+                        <li><?php esc_html_e('Upload the service-account JSON, iOS plist, and Android google-services JSON above. All files must use the same Firebase project ID.', 'masjidfeed-app'); ?></li>
+                        <li><?php esc_html_e('Save settings, choose Validate connection on the Debug tab, then paste a current device FCM token and send a test notification.', 'masjidfeed-app'); ?></li>
+                        <li><?php esc_html_e('For reliable queued delivery, configure the host scheduler to invoke WordPress cron instead of relying only on site traffic.', 'masjidfeed-app'); ?></li>
+                    </ol>
+                </div>
+            </details>
 
             <?php submit_button(); ?>
         </form>
@@ -910,6 +1027,194 @@ class Masjid_Feed_Settings {
         $this->redirect_with_notice('api_traces_cleared', 'success', 'debug');
     }
 
+    public function handle_register_gateway() {
+        check_admin_referer('masjidfeed_register_gateway');
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjidfeed-app'));
+        }
+        try {
+            $result = $this->register_with_gateway();
+        } catch (Throwable $exception) {
+            $this->redirect_with_notice(rawurlencode(substr($exception->getMessage(), 0, 300)), 'error', 'push');
+        }
+        if ('pending' === $result['state']) {
+            $this->redirect_with_notice(rawurlencode(__('The push service could not verify this site\'s domain during registration. Registration is pending: make sure the WordPress REST API is publicly reachable, then press Register again to retry.', 'masjidfeed-app')), 'error', 'push');
+        }
+        $this->redirect_with_notice(
+            rawurlencode(sprintf(
+                /* translators: %s: gateway site ID */
+                __('Registered with the MasjidFeed push service. Site ID: %s', 'masjidfeed-app'),
+                $result['site_id']
+            )),
+            'success',
+            'push'
+        );
+    }
+
+    public function handle_validate_gateway() {
+        check_admin_referer('masjidfeed_validate_gateway');
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjidfeed-app'));
+        }
+        if (!self::is_gateway_registered()) {
+            $this->redirect_with_notice('gateway_not_registered', 'error', 'debug');
+        }
+        try {
+            (new Masjid_Feed_Gateway())->validate_connection();
+            $this->redirect_with_notice('gateway_valid', 'success', 'debug');
+        } catch (Throwable $exception) {
+            $this->redirect_with_notice(rawurlencode(substr($exception->getMessage(), 0, 300)), 'error', 'debug');
+        }
+    }
+
+    public function handle_rotate_gateway_topic() {
+        check_admin_referer('masjidfeed_rotate_gateway_topic');
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjidfeed-app'));
+        }
+        if (!self::is_gateway_registered()) {
+            $this->redirect_with_notice('gateway_not_registered', 'error', 'push');
+        }
+        try {
+            $version = (new Masjid_Feed_Gateway())->rotate_topic();
+        } catch (Throwable $exception) {
+            $this->redirect_with_notice(rawurlencode(substr($exception->getMessage(), 0, 300)), 'error', 'push');
+        }
+        $this->redirect_with_notice(
+            rawurlencode(sprintf(
+                /* translators: %d: new topic version */
+                __('Topic keys rotated; the gateway issued version %1$d. Devices re-subscribe on their next topic-key fetch, and the previous version keeps receiving notifications during the rotation grace window.', 'masjidfeed-app'),
+                $version
+            )),
+            'success',
+            'push'
+        );
+    }
+
+    public function handle_fetch_gateway_audit() {
+        check_admin_referer('masjidfeed_fetch_gateway_audit');
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjidfeed-app'));
+        }
+        if (!self::is_gateway_registered()) {
+            $this->redirect_with_notice('gateway_not_registered', 'error', 'debug');
+        }
+        try {
+            $entries = (new Masjid_Feed_Gateway())->site_audit();
+        } catch (Throwable $exception) {
+            $this->redirect_with_notice(rawurlencode(substr($exception->getMessage(), 0, 300)), 'error', 'debug');
+        }
+        set_transient(self::GATEWAY_AUDIT_TRANSIENT, $entries, 5 * MINUTE_IN_SECONDS);
+        $this->redirect_with_notice('gateway_audit_fetched', 'success', 'debug');
+    }
+
+    public function handle_gateway_send_status() {
+        check_admin_referer('masjidfeed_gateway_send_status');
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjidfeed-app'));
+        }
+        if (!self::is_gateway_registered()) {
+            $this->redirect_with_notice('gateway_not_registered', 'error', 'debug');
+        }
+        global $wpdb;
+        $job_id = absint($_POST['job_id'] ?? 0);
+        $table = $wpdb->prefix . 'masjidfeed_push_jobs';
+        $sql = sprintf('SELECT * FROM %s WHERE id = %%d', esc_sql($table));
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- admin-only send-status lookup of the custom queue table; the table name is built from a fixed identifier and the parameter is prepared.
+        $job = $wpdb->get_row($wpdb->prepare($sql, $job_id));
+        $send_id = is_object($job) ? (string) $job->firebase_message_id : '';
+        if ('' === $send_id) {
+            $this->redirect_with_notice('gateway_send_status_missing', 'error', 'debug');
+        }
+        try {
+            $status = (new Masjid_Feed_Gateway())->send_status($send_id);
+        } catch (Throwable $exception) {
+            $this->redirect_with_notice(rawurlencode(substr($exception->getMessage(), 0, 300)), 'error', 'debug');
+        }
+        set_transient(self::GATEWAY_SEND_STATUS_TRANSIENT, array('send_id' => $send_id, 'record' => $status), 5 * MINUTE_IN_SECONDS);
+        $this->redirect_with_notice('gateway_send_status_fetched', 'success', 'debug');
+    }
+
+    /**
+     * Run the gateway onboarding flow. The plugin generates a one-time proof
+     * challenge plus a random fetch token and registers: the gateway fetches
+     * the challenge by callback — presenting the fetch token, which the
+     * verification endpoint requires before serving anything — and returns
+     * the gateway secret (shown once) in the same response. The fetch token
+     * also authorizes the verify retry endpoint, so only this site can
+     * complete its own onboarding. A previous attempt that failed the
+     * callback left the site pending — that site is completed through the
+     * verify retry endpoint instead of creating a duplicate.
+     *
+     * @return array{state: string, site_id: string} State is 'active' or 'pending'.
+     */
+    private function register_with_gateway() {
+        $gateway = new Masjid_Feed_Gateway();
+        $settings = get_option(MASJIDFEED_OPTION_KEY, array());
+        $settings = is_array($settings) ? $settings : array();
+        $site_id = (string) ($settings['gateway_site_id'] ?? '');
+        $secret = (string) ($settings['gateway_secret'] ?? '');
+
+        if ('' !== $site_id && '' === $secret) {
+            try {
+                $verified = $gateway->verify_site($site_id, (string) get_option(self::GATEWAY_FETCH_TOKEN_OPTION, ''));
+            } catch (Masjid_Feed_Gateway_Exception $exception) {
+                $status = $exception->http_status();
+                if (410 !== $status && 404 !== $status) {
+                    throw $exception;
+                }
+                // The pending site no longer exists: its challenge expired
+                // (410) or the gateway tore the registration down after a
+                // definitive verification rejection (404). Either way there
+                // is no retry path for that site — start over fresh.
+                $site_id = '';
+            }
+            if ('' !== $site_id) {
+                return $this->store_gateway_registration($verified);
+            }
+        }
+
+        // The challenge and fetch token must be stored before the
+        // registration POST: the gateway fetches the challenge — presenting
+        // the token — during that request.
+        $challenge = wp_generate_password(64, false);
+        $fetch_token = wp_generate_password(64, false);
+        update_option(self::GATEWAY_CHALLENGE_OPTION, $challenge, false);
+        update_option(self::GATEWAY_FETCH_TOKEN_OPTION, $fetch_token, false);
+        try {
+            $registration = $gateway->register_site($challenge, $fetch_token);
+        } catch (Throwable $exception) {
+            delete_option(self::GATEWAY_CHALLENGE_OPTION);
+            delete_option(self::GATEWAY_FETCH_TOKEN_OPTION);
+            throw $exception;
+        }
+        if ('' !== $registration['gateway_secret']) {
+            $this->store_gateway_registration($registration);
+            return array('state' => 'active', 'site_id' => $registration['site_id']);
+        }
+        // Callback failed retryably: keep serving the challenge to the
+        // token-holding gateway and remember the site so the next attempt
+        // completes onboarding through verify_site().
+        $settings['gateway_site_id'] = $registration['site_id'];
+        update_option(MASJIDFEED_OPTION_KEY, $settings);
+        return array('state' => 'pending', 'site_id' => $registration['site_id']);
+    }
+
+    /**
+     * Persist a completed registration: site ID plus the one-time gateway
+     * secret, dropping the now-consumed proof challenge and fetch token.
+     */
+    private function store_gateway_registration(array $registration) {
+        $settings = get_option(MASJIDFEED_OPTION_KEY, array());
+        $settings = is_array($settings) ? $settings : array();
+        $settings['gateway_site_id'] = $registration['site_id'];
+        $settings['gateway_secret'] = $registration['gateway_secret'];
+        update_option(MASJIDFEED_OPTION_KEY, $settings);
+        delete_option(self::GATEWAY_CHALLENGE_OPTION);
+        delete_option(self::GATEWAY_FETCH_TOKEN_OPTION);
+        return array('state' => 'active', 'site_id' => $registration['site_id']);
+    }
+
     /**
      * Sanitize the parking configuration JSON. The mobile app trusts any 200
      * response from /parking-config, so an invalid document is refused and
@@ -952,11 +1257,15 @@ class Masjid_Feed_Settings {
             return '';
         }
         $without_placeholders = str_replace(array('{masjidId}', '{postId}', '{type}', '{slug}'), 'value', $value);
+        // The gateway only accepts deep links starting with the prefix
+        // registered for this site (masjidapp://), so a template with any
+        // other URI scheme would make every send fail validation.
         $valid = !preg_match('/[\x00-\x20\x7F]/', $value)
             && !preg_match('/[{}]/', $without_placeholders)
+            && 0 === strpos($value, Masjid_Feed_Gateway::DEEP_LINK_PREFIX)
             && preg_match('/^[A-Za-z][A-Za-z0-9+.-]*:.+$/', $without_placeholders);
         if (!$valid) {
-            add_settings_error(MASJIDFEED_OPTION_KEY, 'invalid_deep_link', __('The deep-link override is invalid. Use a URI scheme and only supported placeholders.', 'masjidfeed-app'));
+            add_settings_error(MASJIDFEED_OPTION_KEY, 'invalid_deep_link', __('The deep-link override is invalid. Use the masjidapp:// URI scheme and only supported placeholders.', 'masjidfeed-app'));
             return (string) $previous;
         }
         return $value;
@@ -1103,9 +1412,82 @@ class Masjid_Feed_Settings {
                 'api_tracing_enabled' => __('API call tracing enabled.', 'masjidfeed-app'),
                 'api_tracing_disabled' => __('API call tracing disabled.', 'masjidfeed-app'),
                 'api_traces_cleared' => __('API call traces cleared.', 'masjidfeed-app'),
+                'gateway_valid' => __('The push service accepted this site\'s credentials.', 'masjidfeed-app'),
+                'gateway_not_registered' => __('This site is not registered with the MasjidFeed push service.', 'masjidfeed-app'),
+                'gateway_audit_fetched' => __('Gateway audit trail fetched.', 'masjidfeed-app'),
+                'gateway_send_status_fetched' => __('Gateway send status fetched.', 'masjidfeed-app'),
+                'gateway_send_status_missing' => __('That notification has no send ID, so it was never delivered through the push service.', 'masjidfeed-app'),
             );
             echo '<div class="notice notice-' . esc_attr('error' === $notice_type ? 'error' : 'success') . '"><p>' . esc_html($messages[$notice] ?? rawurldecode($notice)) . '</p></div>';
         }
+    }
+
+    /**
+     * Gateway debug tools: connection validation, the registration audit
+     * trail, and the delivery status of one queued send. Everything is
+     * fetched on demand (admin-post buttons); results are rendered from
+     * short-lived transients set by the handlers.
+     */
+    private function render_gateway_tools() {
+        ?>
+        <h3><?php esc_html_e('Push service tools', 'masjidfeed-app'); ?></h3>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block;margin-right:8px;">
+            <input type="hidden" name="action" value="masjidfeed_validate_gateway" /><?php wp_nonce_field('masjidfeed_validate_gateway'); ?>
+            <?php submit_button(__('Validate push service connection', 'masjidfeed-app'), 'secondary', 'submit', false); ?>
+        </form>
+        <p class="description" style="max-width:900px;"><?php esc_html_e('Checks this site\'s registration with the hosted push service: the stored site ID and secret are verified against the gateway without sending any notification.', 'masjidfeed-app'); ?></p>
+        <?php $this->render_gateway_audit_results(); ?>
+        <?php $this->render_gateway_send_status_result();
+    }
+
+    /**
+     * Show the registration audit trail fetched by handle_fetch_gateway_audit().
+     */
+    private function render_gateway_audit_results() {
+        $entries = get_transient(self::GATEWAY_AUDIT_TRANSIENT);
+        delete_transient(self::GATEWAY_AUDIT_TRANSIENT);
+        if (!is_array($entries)) {
+            return;
+        }
+        ?>
+        <h4><?php esc_html_e('Registration audit trail', 'masjidfeed-app'); ?></h4>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-bottom:8px;">
+            <input type="hidden" name="action" value="masjidfeed_fetch_gateway_audit" /><?php wp_nonce_field('masjidfeed_fetch_gateway_audit'); ?>
+            <?php submit_button(__('Refresh audit trail', 'masjidfeed-app'), 'secondary', 'submit', false); ?>
+        </form>
+        <?php if (!$entries) : ?>
+            <p class="description"><?php esc_html_e('The push service has no audit entries for this site.', 'masjidfeed-app'); ?></p>
+            <?php return;
+        endif; ?>
+        <table class="widefat striped" style="max-width:900px;">
+            <thead><tr><th style="width:30%;"><?php esc_html_e('Time (UTC)', 'masjidfeed-app'); ?></th><th style="width:30%;"><?php esc_html_e('Actor', 'masjidfeed-app'); ?></th><th><?php esc_html_e('Action', 'masjidfeed-app'); ?></th></tr></thead>
+            <tbody>
+                <?php foreach ($entries as $entry) : ?>
+                    <tr>
+                        <td><?php echo esc_html((string) ($entry['at'] ?? '')); ?></td>
+                        <td><?php echo esc_html((string) ($entry['actor'] ?? '')); ?></td>
+                        <td><code><?php echo esc_html((string) ($entry['action'] ?? '')); ?></code></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php
+    }
+
+    /**
+     * Show the FCM message record fetched by handle_gateway_send_status().
+     */
+    private function render_gateway_send_status_result() {
+        $result = get_transient(self::GATEWAY_SEND_STATUS_TRANSIENT);
+        delete_transient(self::GATEWAY_SEND_STATUS_TRANSIENT);
+        if (!is_array($result) || !isset($result['send_id'], $result['record'])) {
+            return;
+        }
+        ?>
+        <h4><?php esc_html_e('Send status', 'masjidfeed-app'); ?></h4>
+        <p class="description"><code><?php echo esc_html((string) $result['send_id']); ?></code></p>
+        <pre style="max-width:900px;overflow:auto;white-space:pre-wrap;"><?php echo esc_html(wp_json_encode($result['record'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)); ?></pre>
+        <?php
     }
 
     private function render_firebase_tools() {
@@ -1192,6 +1574,12 @@ class Masjid_Feed_Settings {
                 echo '</form>';
             } else {
                 echo esc_html($job->firebase_message_id ?: $job->error_message);
+            }
+            if ('' !== (string) $job->firebase_message_id) {
+                echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '"><input type="hidden" name="action" value="masjidfeed_gateway_send_status" /><input type="hidden" name="job_id" value="' . (int) $job->id . '" />';
+                wp_nonce_field('masjidfeed_gateway_send_status');
+                submit_button(__('Check status', 'masjidfeed-app'), 'link', 'submit', false);
+                echo '</form>';
             }
             echo '</td></tr>';
         }

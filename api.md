@@ -208,6 +208,34 @@ Example response:
 }
 ```
 
+#### Hosted MasjidFeed push service
+
+When the site delivers push through the hosted MasjidFeed service instead of
+its own Firebase project, registration works differently: the server forwards
+the App Check token to the push gateway, which verifies it against the central
+Firebase project and returns the site's canonical topic. The app subscribes to
+that topic client-side (Firebase Messaging `subscribeToTopic`); no FCM token
+is registered server-side, so `token` may be omitted.
+
+Example response:
+
+```json
+{
+  "registered": true,
+  "topicKey": {
+    "site_id": "ms_1a2b3c4d",
+    "topic": "tenant_ms_1a2b3c4d_v1_8f4e2c",
+    "version": 1,
+    "expires_at": "2026-11-01T12:00:00Z"
+  }
+}
+```
+
+A site configured for both delivery channels returns `result` and `topicKey`
+together. `DELETE /push/registrations` under the hosted service performs no
+server-side action and always answers `{"registered": false}`: unsubscription
+happens client-side against the topic from `topicKey`.
+
 ### `DELETE /push/registrations`
 
 Unsubscribes a token when the app changes tenant or disables notifications. The
