@@ -177,7 +177,11 @@ class Masjid_Feed_Gateway {
             array(),
             array('fetch_token' => $fetch_token)
         );
-        if (empty($data['site_id'])) {
+        // Verification always completes onboarding: a response without the
+        // secret must fail loudly instead of storing an empty secret that
+        // keeps the registration looking uncompleted (or, worse, reports
+        // success to the admin while nothing was stored).
+        if (empty($data['site_id']) || '' === (string) ($data['gateway_secret'] ?? '')) {
             throw new Masjid_Feed_Gateway_Exception(__('The push service returned an incomplete verification response.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
         }
         return array(

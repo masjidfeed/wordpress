@@ -332,6 +332,85 @@ class SettingsPushTabTest extends TestCase {
         $this->assertArrayNotHasKey(Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION, $GLOBALS['__test_options']);
     }
 
+    public function test_registration_starts_over_when_the_pending_site_is_no_longer_pending(): void {
+        // Verify answers 403 when the pending site is no longer pending: it
+        // is already active with a secret this site never received, or it
+        // was revoked or banned. Retrying verify could never succeed, so the
+        // flow must start a fresh registration — for a revoked site the
+        // gateway replaces it and onboarding completes here.
+        $this->store_settings(['gateway_site_id' => 'site-9']);
+        $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION] = 'pending-challenge';
+        $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION] = 'pending-token';
+        $GLOBALS['__test_wp_remote_request_responses'] = [
+            $this->http_response(403, ['error' => ['code' => 'forbidden', 'message' => 'site is not active']]),
+            $this->http_response(201, ['site_id' => 'site-new', 'status' => 'active', 'gateway_secret' => 'secret-5']),
+        ];
+
+        $result = $this->register_with_gateway();
+
+        $this->assertSame('active', $result['state']);
+        $stored = $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY];
+        $this->assertSame('site-new', $stored['gateway_site_id']);
+        $this->assertSame('secret-5', $stored['gateway_secret']);
+        $this->assertCount(2, $GLOBALS['__test_wp_remote_requests']);
+        $this->assertStringEndsWith('/v1/sites/site-9/verify', $GLOBALS['__test_wp_remote_requests'][0]['url']);
+        $this->assertStringEndsWith('/v1/sites', $GLOBALS['__test_wp_remote_requests'][1]['url']);
+        $this->assertArrayNotHasKey(Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION, $GLOBALS['__test_options']);
+        $this->assertArrayNotHasKey(Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION, $GLOBALS['__test_options']);
+    }
+
+    public function test_reregistration_replaces_stale_secret_when_new_registration_stays_pending(): void {
+        // The gateway revoked or deleted the old registration while the
+        // plugin still holds its site ID and secret. A fresh registration
+        // that stays pending (callback failed retryably) must not pair the
+        // NEW site ID with the OLD secret: that would look registered while
+        // every gateway call answers 401, and the next attempt would skip
+        // verification because a secret is set.
+        $this->store_settings(['gateway_site_id' => 'site-old', 'gateway_secret' => 'stale-secret']);
+        $GLOBALS['__test_wp_remote_request_responses'] = [
+            $this->http_response(201, ['site_id' => 'site-new', 'status' => 'pending', 'verification_url' => 'https://example.test/wp-json/masjid/v1/gateway-verification']),
+        ];
+
+        $result = $this->register_with_gateway();
+
+        $this->assertSame('pending', $result['state']);
+        $stored = $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY];
+        $this->assertSame('site-new', $stored['gateway_site_id']);
+        $this->assertArrayNotHasKey('gateway_secret', $stored);
+        $this->assertFalse(Masjid_Feed_Settings::is_gateway_registered());
+        $this->assertTrue(Masjid_Feed_Settings::is_gateway_pending());
+        // The fresh attempt's challenge and fetch token stay stored so the
+        // retry can verify.
+        $this->assertSame('test-challenge', $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION]);
+        $this->assertSame('test-challenge-2', $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION]);
+    }
+
+    public function test_verify_response_without_secret_fails_instead_of_storing_empty(): void {
+        // A verify response is only complete with the one-time secret:
+        // storing an empty secret would report success to the admin while
+        // the registration never actually completed.
+        $this->store_settings(['gateway_site_id' => 'site-9']);
+        $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION] = 'pending-challenge';
+        $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION] = 'pending-token';
+        $GLOBALS['__test_wp_remote_request_responses'] = [
+            $this->http_response(200, ['site_id' => 'site-9', 'status' => 'active']),
+        ];
+
+        try {
+            $this->register_with_gateway();
+            $this->fail('Expected an exception.');
+        } catch (Masjid_Feed_Gateway_Exception $exception) {
+            $this->assertSame(0, $exception->http_status());
+        }
+        // Nothing was overwritten: the pending site stays pending for a
+        // retry.
+        $stored = $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY];
+        $this->assertSame('site-9', $stored['gateway_site_id']);
+        $this->assertArrayNotHasKey('gateway_secret', $stored);
+        $this->assertSame('pending-challenge', $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_CHALLENGE_OPTION]);
+        $this->assertSame('pending-token', $GLOBALS['__test_options'][Masjid_Feed_Settings::GATEWAY_FETCH_TOKEN_OPTION]);
+    }
+
     public function test_url_claimed_pending_error_maps_to_actionable_notice(): void {
         // A gateway 5xx after the pending site was committed leaves the site
         // ID unknown to the plugin; the next registration then answers 400
@@ -355,6 +434,25 @@ class SettingsPushTabTest extends TestCase {
         $other = new Masjid_Feed_Gateway_Invalid_Request($other_message);
         $other->set_response_details(400, json_encode(['error' => ['code' => 'validation', 'message' => $other_message]]));
         $this->assertSame($other_message, $method->invoke($settings, $other));
+    }
+
+    public function test_url_claimed_active_error_maps_to_actionable_notice(): void {
+        // The gateway activated the site and issued its one-time secret, but
+        // the response was lost before the plugin stored it: the next
+        // registration then answers 400 validation "url already registered
+        // and active". The notice explains that only the push service can
+        // free the URL — the secret was shown once and is unrecoverable.
+        $gateway_message = 'url already registered and active; email masjidfeed@goodsoftware.foundation to have it revoked';
+        $exception = new Masjid_Feed_Gateway_Invalid_Request($gateway_message);
+        $exception->set_response_details(400, json_encode(['error' => ['code' => 'validation', 'message' => $gateway_message]]));
+
+        $settings = new Masjid_Feed_Settings();
+        $method = new ReflectionMethod(Masjid_Feed_Settings::class, 'gateway_registration_error_message');
+
+        $mapped = $method->invoke($settings, $exception);
+        $this->assertStringContainsString('never received the one-time secret', $mapped);
+        $this->assertStringContainsString('masjidfeed@goodsoftware.foundation', $mapped);
+        $this->assertStringNotContainsString($gateway_message, $mapped);
     }
 
     public function test_push_tab_renders_topic_rotation_only_when_registered(): void {

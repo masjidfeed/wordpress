@@ -1080,18 +1080,22 @@ class Masjid_Feed_Settings {
     /**
      * Map a gateway exception from the registration flow to an admin notice
      * message. The gateway's own message is shown verbatim, except when the
-     * URL claim is stuck pending: the gateway still holds the pending
-     * registration an earlier attempt created, but this site no longer knows
-     * its site ID (that attempt failed before the ID was stored), so the
-     * claim frees itself only when the 24-hour challenge expires — or the
-     * gateway operator revokes it from the admin UI.
+     * URL claim is stuck: the gateway still holds the registration an
+     * earlier attempt created, but this site no longer knows that
+     * registration's site ID or secret (that attempt's response was lost
+     * after the gateway committed it), so the claim frees itself only when
+     * the gateway operator revokes the site from the admin UI — or, for a
+     * pending claim, when the 24-hour challenge expires.
      */
     private function gateway_registration_error_message(Masjid_Feed_Gateway_Exception $exception): string {
         $message = $exception->getMessage();
-        if (400 === $exception->http_status()
-            && 'validation' === $exception->error_code()
-            && false !== strpos($message, 'url already registered and pending verification')) {
-            return __('The push service already has a pending registration for this site URL, but this site can no longer complete it because that registration was interrupted. Wait for the pending registration to expire (24 hours) and press Register again, or email masjidfeed@goodsoftware.foundation to have it revoked sooner.', 'masjidfeed-app');
+        if (400 === $exception->http_status() && 'validation' === $exception->error_code()) {
+            if (false !== strpos($message, 'url already registered and pending verification')) {
+                return __('The push service already has a pending registration for this site URL. Wait for the pending registration to expire (24 hours) and press Register again, or email masjidfeed@goodsoftware.foundation to have it revoked sooner.', 'masjidfeed-app');
+            }
+            if (false !== strpos($message, 'url already registered and active')) {
+                return __('The push service already has an active registration for this site URL, but this site never received the one-time secret that registration issued, so it cannot authenticate. The push service must revoke that registration before this site can register again: email masjidfeed@goodsoftware.foundation to have it revoked, then press Register again.', 'masjidfeed-app');
+            }
         }
         return $message;
     }
@@ -1205,13 +1209,19 @@ class Masjid_Feed_Settings {
                 $verified = $gateway->verify_site($site_id, (string) get_option(self::GATEWAY_FETCH_TOKEN_OPTION, ''));
             } catch (Masjid_Feed_Gateway_Exception $exception) {
                 $status = $exception->http_status();
-                if (410 !== $status && 404 !== $status) {
+                if (401 !== $status && 403 !== $status && 410 !== $status && 404 !== $status) {
                     throw $exception;
                 }
-                // The pending site no longer exists: its challenge expired
-                // (410) or the gateway tore the registration down after a
-                // definitive verification rejection (404). Either way there
-                // is no retry path for that site — start over fresh.
+                // The pending site has no retry path for THIS registration:
+                // its challenge expired (410), the gateway tore the
+                // registration down after a definitive verification rejection
+                // (404), the stored fetch token no longer matches (401), or
+                // the site is no longer pending at all (403) — already active
+                // with a secret this site never received, or revoked or
+                // banned by the operator. A fresh registration either
+                // completes (the gateway replaces a revoked site) or answers
+                // with a claim refusal this flow maps to an actionable
+                // notice; retrying verify could never succeed.
                 $site_id = '';
             }
             if ('' !== $site_id) {
@@ -1239,8 +1249,15 @@ class Masjid_Feed_Settings {
         }
         // Callback failed retryably: keep serving the challenge to the
         // token-holding gateway and remember the site so the next attempt
-        // completes onboarding through verify_site().
+        // completes onboarding through verify_site(). The stored secret is
+        // dropped with the site ID it belonged to: this attempt replaced
+        // that registration, so a secret kept here would pair the new site
+        // ID with a credential the gateway has already invalidated — and
+        // make the next attempt skip verification because a secret is set.
+        $settings = get_option(MASJIDFEED_OPTION_KEY, array());
+        $settings = is_array($settings) ? $settings : array();
         $settings['gateway_site_id'] = $registration['site_id'];
+        unset($settings['gateway_secret']);
         update_option(MASJIDFEED_OPTION_KEY, $settings);
         return array('state' => 'pending', 'site_id' => $registration['site_id']);
     }
@@ -1613,6 +1630,7 @@ class Masjid_Feed_Settings {
         foreach ($jobs as $job) {
             echo '<tr><td>' . esc_html($job->created_at) . '</td><td><a href="' . esc_url(get_edit_post_link($job->post_id)) . '">#' . (int) $job->post_id . '</a></td><td>' . esc_html($job->trigger_type) . '</td><td>' . esc_html($job->status) . '</td><td>' . (int) $job->attempts . '</td><td>';
             if ('failed' === $job->status) {
+                echo esc_html($job->error_message);
                 echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '"><input type="hidden" name="action" value="masjidfeed_retry_push" /><input type="hidden" name="job_id" value="' . (int) $job->id . '" />';
                 wp_nonce_field('masjidfeed_retry_push_' . $job->id);
                 submit_button(__('Retry', 'masjidfeed-app'), 'small', 'submit', false);
