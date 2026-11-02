@@ -61,11 +61,15 @@ instead.
 > `push-gateway/docs/security-audit.md` (rev 3) and
 > `push-gateway/docs/wp-plugin-integration.md` for the implemented contract.
 
-## 2. Topic key issuance (app → gateway)
+## 2. Topic issuance and device registration (app → gateway)
 
-`POST {gateway}/v1/topic-key` — called by the **app**, not the plugin.
+`POST {gateway}/v1/topic-key` and `POST {gateway}/v1/devices` — both reachable
+through the plugin's `/push/registrations` proxy, which forwards the app's
+`X-Firebase-AppCheck` header. The app picks the path per request with the
+optional `registrationMode` parameter: `client` proxies `/v1/topic-key`,
+`server` (default) proxies `/v1/devices`.
 
-- Body: `{site_id}`; header: `X-Firebase-AppCheck`.
+- `/v1/topic-key` body: `{site_id}`; `/v1/devices` body: `{site_id, token}`.
 - Gateway verifies the App Check token against the central project's JWKS and
   the two known app IDs (both are properties of the single app binary, so they
   are static gateway config — no per-site lookup).
@@ -73,12 +77,16 @@ instead.
   `/config` ping cached for minutes, so this is ~one outbound request per user
   session, not per device).
 - Gateway returns `topic = "tenant_<site_id>_<version>_<topic_secret>"`.
-- The app subscribes **client-side** via `FirebaseMessaging.subscribeToTopic`
-  — free, no server call, no storage, no token-hygiene jobs.
+- `/v1/devices` (server mode) subscribes the device's FCM registration token
+  to the topic server-side (FCM Instance ID) and stores the token nowhere.
+  `/v1/topic-key` (client mode) hands the topic to the app, which subscribes
+  itself via `FirebaseMessaging.subscribeToTopic`; the token is not needed.
+  Both answer with the same topic-key shape, so clients can switch freely.
+- After a rotation, the device's next registration call moves it onto the new
+  topic.
 
 The topic secret must not ship in the plugin or the public `/config` — it is
-only obtainable through this App-Check-gated endpoint. The client SDK is the
-only client-side subscribe path.
+only obtainable through these App-Check-gated endpoints.
 
 ## 3. Sending (plugin → gateway)
 
@@ -88,18 +96,25 @@ only client-side subscribe path.
 - Auth: `Authorization: Bearer <gateway_secret>`; `site_id` comes from the
   URL, **not** the body.
 - Gateway actions: authenticate → rate limit (per-site token bucket + daily
-  quota) → validate payload schema (title/body lengths, `deepLink` must match
-  the site's registered template scheme) → check `notification_id` idempotency
+  quota) → validate payload schema (title/body lengths, `deep_link` must match
+  the site's registered template scheme, `image` must be an absolute https
+  URL) → check `notification_id` idempotency
   (recent-IDs cache per site) → publish to `/topics/tenant_<site_id>_<version>_<topic_secret>` →
   return the FCM message name.
+- The send body carries `notification_id`, `title`, `body`, `deep_link`,
+  `image`, `masjid_id`, `post_id`, and `type` — the gateway maps the optional
+  fields onto the identical FCM message the direct-FCM channel produces
+  (`notification.image`, APNs `mutable-content` + `fcm_options.image`,
+  camelCase `notificationId`/`deepLink`/`masjidId`/`postId`/`type` data keys),
+  so both delivery channels are indistinguishable to the app (api.md).
 - The plugin keeps its existing queue, dedupe, retry/backoff, and admin UI
   untouched; only the send call and the "Validate connection" debug tool change
   to hit the gateway.
 
 ### Topic rotation
 
-Version the topic name. When a topic secret is rotated, the app re-subscribes
-when `/config` or the topic key changes, and the gateway accepts sends to the
+Version the topic name. When a topic secret is rotated, the app re-registers
+when `/config` or the topic changes, and the gateway accepts sends to the
 previous version for a grace window.
 
 ## 4. Data model (gateway)
@@ -143,7 +158,7 @@ audit_log    (actor, action, site_id, at)
   model) — accepted because notification content is public.
 - Loss of per-site APNs tuning is irrelevant: one central project already owns
   APNs.
-- The gateway is intentionally thin: topic-key issuance, send, quotas — no
+- The gateway is intentionally thin: topic issuance and device registration, send, quotas — no
   content storage, no device registry. Stateless behind a load balancer.
 - Plugin-side removals: service-account upload/validation
   (`process_firebase_uploads`), `Masjid_Feed_Credential_Store` usage becomes

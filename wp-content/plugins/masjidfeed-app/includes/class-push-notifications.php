@@ -34,6 +34,7 @@ class Masjid_Feed_Push_Notifications {
             attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
             next_attempt_at DATETIME DEFAULT NULL,
             firebase_message_id VARCHAR(255) DEFAULT NULL,
+            channel VARCHAR(20) DEFAULT NULL,
             error_message TEXT DEFAULT NULL,
             created_at DATETIME NOT NULL,
             updated_at DATETIME NOT NULL,
@@ -114,12 +115,13 @@ class Masjid_Feed_Push_Notifications {
 
         try {
             $payload = json_decode($job->payload, true, 512, JSON_THROW_ON_ERROR);
-            $message_id = $this->send_payload($payload);
+            $sent = $this->send_payload($payload);
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- status transition on the custom queue table.
             $wpdb->update($table, array(
                 'status' => 'sent',
                 'attempts' => (int) $job->attempts + 1,
-                'firebase_message_id' => sanitize_text_field($message_id),
+                'firebase_message_id' => sanitize_text_field($sent['send_id']),
+                'channel' => sanitize_key($sent['channel']),
                 'error_message' => null,
                 'sent_at' => current_time('mysql', true),
                 'updated_at' => current_time('mysql', true),
@@ -242,9 +244,15 @@ class Masjid_Feed_Push_Notifications {
                 'deepLink' => $deep_link,
             ),
         );
+        // The image contract (api.md) is an HTTPS featured image: both push
+        // channels — direct FCM and the gateway — take it from this one
+        // field, and the gateway rejects anything but an absolute https URL.
         $image_url = get_the_post_thumbnail_url($post_id, 'large');
         if ($image_url) {
-            $payload['image'] = esc_url_raw($image_url);
+            $image_url = esc_url_raw($image_url);
+            if ($image_url && 'https' === wp_parse_url($image_url, PHP_URL_SCHEME)) {
+                $payload['image'] = $image_url;
+            }
         }
         return $payload;
     }
@@ -271,8 +279,13 @@ class Masjid_Feed_Push_Notifications {
      * Deliver one payload over every channel the selected push mode calls
      * for. The job counts as sent when at least one channel succeeds; it is
      * only a failure (and eligible for retry) when all channels failed.
+     *
+     * Returns the channel that produced the stored receipt plus its send_id
+     * (the FCM message name). The name is FCM's acceptance receipt only:
+     * the FCM API has no per-message read method, so it cannot be looked up
+     * later — per-message delivery data does not exist in FCM's API.
      */
-    private function send_payload(array $payload): string {
+    private function send_payload(array $payload): array {
         $mode = Masjid_Feed_Settings::push_mode();
         $channels = array();
         if (in_array($mode, array(Masjid_Feed_Settings::PUSH_MODE_MASJIDFEED, Masjid_Feed_Settings::PUSH_MODE_BOTH), true)) {
@@ -287,17 +300,14 @@ class Masjid_Feed_Push_Notifications {
             throw new RuntimeException(__('Push notifications are disabled.', 'masjidfeed-app'));
         }
 
-        $message_id = '';
+        $results = array();
         $failures = array();
         foreach ($channels as $channel) {
             try {
                 if ('gateway' === $channel) {
-                    $send_id = (string) (new Masjid_Feed_Gateway())->send($payload);
+                    $results[$channel] = (string) (new Masjid_Feed_Gateway())->send($payload);
                 } else {
-                    $send_id = (string) ((new Masjid_Feed_Firebase())->send_topic($payload)['name'] ?? '');
-                }
-                if ('' === $message_id) {
-                    $message_id = $send_id;
+                    $results[$channel] = (string) ((new Masjid_Feed_Firebase())->send_topic($payload)['name'] ?? '');
                 }
             } catch (Throwable $exception) {
                 $failures[] = $exception;
@@ -306,6 +316,27 @@ class Masjid_Feed_Push_Notifications {
         if (count($failures) === count($channels)) {
             throw $failures[0];
         }
-        return $message_id;
+        return self::pick_receipt($results);
+    }
+
+    /**
+     * Pick the receipt to store: the first channel (in mode order, the
+     * MasjidFeed push service first) that returned a send_id wins.
+     *
+     * @param array<string, string> $results channel => send_id ('' when the channel did not return one).
+     * @return array{channel: string, send_id: string}
+     */
+    public static function pick_receipt(array $results): array {
+        foreach ($results as $channel => $send_id) {
+            if ('' !== (string) $send_id) {
+                return array(
+                    'channel' => 'gateway' === $channel
+                        ? Masjid_Feed_Settings::PUSH_MODE_MASJIDFEED
+                        : Masjid_Feed_Settings::PUSH_MODE_FCM,
+                    'send_id' => (string) $send_id,
+                );
+            }
+        }
+        return array('channel' => '', 'send_id' => '');
     }
 }

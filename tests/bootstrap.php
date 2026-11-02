@@ -78,18 +78,37 @@ if (!function_exists('delete_transient')) {
 }
 
 class WP_Error {
-    private $message;
-    public function __construct($code = '', $message = '') {
-        $this->message = $message;
-    }
-    public function get_error_message() {
-        return $this->message;
+    private $errors = [];
+    private $error_data = [];
+    public function __construct($code = '', $message = '', $data = array()) {
+        $this->errors[(string) $code] = $message;
+        if (!empty($data)) {
+            $this->add_data($data, (string) $code);
+        }
     }
     public function get_error_code() {
-        return $this->message ? $this->message : '';
+        $codes = array_keys($this->errors);
+        return $codes[0] ?? '';
+    }
+    public function get_error_message($code = '') {
+        if ('' === $code) {
+            $messages = array_values($this->errors);
+            return $messages[0] ?? '';
+        }
+        return $this->errors[$code] ?? '';
     }
     public function add_data($data, $code = '') {
+        if ('' === $code) {
+            $code = $this->get_error_code();
+        }
+        $this->error_data[$code] = $data;
         return $this;
+    }
+    public function get_error_data($code = '') {
+        if ('' === $code) {
+            $code = $this->get_error_code();
+        }
+        return $this->error_data[$code] ?? false;
     }
 }
 
@@ -167,19 +186,22 @@ class WP_REST_Request {
     }
 }
 
-class WP_REST_Response {
-    private $data;
-    private $status;
-    private $headers = [];
-    public function __construct($data = null, $status = 200) {
-        $this->data = $data;
-        $this->status = $status;
-    }
+class WP_HTTP_Response {
+    protected $data;
+    protected $status = 200;
     public function get_data() {
         return $this->data;
     }
     public function get_status() {
         return $this->status;
+    }
+}
+
+class WP_REST_Response extends WP_HTTP_Response {
+    private $headers = [];
+    public function __construct($data = null, $status = 200) {
+        $this->data = $data;
+        $this->status = $status;
     }
     public function get_headers() {
         return $this->headers;
@@ -286,8 +308,28 @@ if (!function_exists('get_post_meta')) {
 
 if (!function_exists('get_the_title')) {
     function get_the_title($post_id) {
+        if (is_object($post_id)) {
+            return $post_id->post_title ?? '';
+        }
         $post = get_post($post_id);
         return $post->post_title ?? '';
+    }
+}
+
+if (!class_exists('WP_Post')) {
+    class WP_Post {
+        public $ID = 0;
+        public $post_title = '';
+        public $post_content = '';
+        public $post_excerpt = '';
+        public $post_name = '';
+        public $post_type = 'post';
+        public $post_status = 'publish';
+        public function __construct(array $props = []) {
+            foreach ($props as $key => $value) {
+                $this->$key = $value;
+            }
+        }
     }
 }
 
@@ -306,6 +348,53 @@ if (!function_exists('get_post_time')) {
 
 if (!function_exists('get_the_post_thumbnail_url')) {
     function get_the_post_thumbnail_url($post_id, $size = 'thumbnail') {
+        return $GLOBALS['__test_thumbnail_urls'][(int) $post_id] ?? false;
+    }
+}
+
+if (!function_exists('wp_parse_url')) {
+    function wp_parse_url($url, $component = -1) {
+        return parse_url((string) $url, $component);
+    }
+}
+
+if (!function_exists('wp_strip_all_tags')) {
+    function wp_strip_all_tags($string, $remove_breaks = false) {
+        $string = preg_replace('@<(script|style)[^>]*?>.*?</\\1>@si', '', (string) $string);
+        $string = strip_tags($string);
+        if ($remove_breaks) {
+            $string = preg_replace('/[\\r\\n\\t ]+/', ' ', $string);
+        }
+        return trim((string) $string);
+    }
+}
+
+if (!function_exists('wp_html_excerpt')) {
+    function wp_html_excerpt($str, $count, $more = null) {
+        $str = wp_strip_all_tags($str, true);
+        $slice = function_exists('mb_substr') ? mb_substr($str, 0, $count) : substr($str, 0, $count);
+        if ($more !== null && $slice !== $str) {
+            return $slice . $more;
+        }
+        return $slice;
+    }
+}
+
+if (!function_exists('has_term')) {
+    function has_term($term = '', $taxonomy = '', $post_id = null) {
+        $terms = get_the_terms((int) $post_id, $taxonomy);
+        if (!is_array($terms)) {
+            return false;
+        }
+        if ('' === $term || null === $term) {
+            return count($terms) > 0;
+        }
+        foreach ($terms as $existing) {
+            $existing_id = is_object($existing) ? ($existing->term_id ?? 0) : 0;
+            if ((int) $existing_id === (int) $term) {
+                return true;
+            }
+        }
         return false;
     }
 }

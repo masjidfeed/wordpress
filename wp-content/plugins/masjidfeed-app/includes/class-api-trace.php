@@ -77,16 +77,22 @@ class Masjid_Feed_API_Trace {
 
         $status = 200;
         $error_code = '';
-        $firebase_details = array();
+        $payload = array();
         if (is_wp_error($response)) {
             $error_code = (string) $response->get_error_code();
             $error_data = $response->get_error_data();
             $status = is_array($error_data) && isset($error_data['status']) ? absint($error_data['status']) : 500;
+            $payload['message'] = $response->get_error_message();
             if (is_array($error_data) && !empty($error_data['firebase'])) {
-                $firebase_details = (array) $error_data['firebase'];
+                $payload['firebase'] = self::redact((array) $error_data['firebase']);
             }
         } elseif ($response instanceof WP_HTTP_Response) {
             $status = $response->get_status();
+            // Mutations (push registration) store the response body; list GET
+            // payloads are far too large to keep in the bounded trace.
+            if ('GET' !== $request->get_method()) {
+                $payload = self::redact($response->get_data());
+            }
         }
 
         $address = sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
@@ -106,10 +112,8 @@ class Masjid_Feed_API_Trace {
             'clientVersion' => $client['version'] ?? '',
             'userAgent' => $user_agent,
             'parameters' => self::redact($request->get_params()),
+            'payload' => $payload,
         );
-        if ($firebase_details) {
-            $entry['payload'] = self::redact($firebase_details);
-        }
 
         self::add_entry($entry);
 
@@ -140,7 +144,10 @@ class Masjid_Feed_API_Trace {
         foreach (array_slice($value, 0, 20, true) as $key => $item) {
             $safe_key = sanitize_key((string) $key);
             $display_key = substr(sanitize_text_field((string) $key), 0, 100);
-            if (preg_match('/token|authorization|password|secret|credential|cookie|key/', $safe_key)) {
+            // (?<!topic)key keeps the gateway topicKey visible — it is the
+            // topic the device was registered against (and may also subscribe
+            // to client-side) — while api_key-style keys stay redacted.
+            if (preg_match('/token|authorization|password|secret|credential|cookie|(?<!topic)key/', $safe_key)) {
                 $redacted[$display_key] = '[redacted]';
                 continue;
             }

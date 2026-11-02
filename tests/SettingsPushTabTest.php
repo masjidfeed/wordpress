@@ -533,19 +533,6 @@ class SettingsPushTabTest extends TestCase {
         $this->assertArrayNotHasKey(Masjid_Feed_Settings::GATEWAY_AUDIT_TRANSIENT, $GLOBALS['__test_transients']);
     }
 
-    public function test_gateway_tools_render_fetched_send_status(): void {
-        $GLOBALS['__test_transients'][Masjid_Feed_Settings::GATEWAY_SEND_STATUS_TRANSIENT] = [
-            'send_id' => 'projects/masjidfeed/messages/abc-123',
-            'record' => ['name' => 'projects/masjidfeed/messages/abc-123', 'state' => 'accepted'],
-        ];
-
-        $html = $this->render_gateway_tools();
-
-        $this->assertStringContainsString('Send status', $html);
-        $this->assertStringContainsString('projects/masjidfeed/messages/abc-123', $html);
-        $this->assertArrayNotHasKey(Masjid_Feed_Settings::GATEWAY_SEND_STATUS_TRANSIENT, $GLOBALS['__test_transients']);
-    }
-
     public function test_obfuscation_masks_secret_looking_values_only(): void {
         $this->assertSame('abcd…wxyz', Masjid_Feed_Settings::obfuscate_setting('abcdefghijklmnopwxyz', 'gateway_secret'));
         // Short secrets are fully masked instead of half-exposed.

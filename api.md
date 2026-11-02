@@ -193,35 +193,41 @@ curl --fail-with-body --silent --show-error \
 
 `platform` is `ios` or `android`. `previousToken` is optional; after the new
 token is subscribed successfully, it is unsubscribed to complete token
-rotation. The App Check application ID must match the uploaded configuration
-for the declared platform.
+rotation. `registrationMode` is optional and selects how a site delivering
+through the hosted MasjidFeed service registers the device (see below);
+sites using their own Firebase project ignore it. The App Check application
+ID must match the uploaded configuration for the declared platform.
 
 Example response:
 
 ```json
 {
-  "registered": true,
-  "result": {
-    "successful": true,
-    "errorCount": 0
-  }
+  "registered": true
 }
 ```
 
 #### Hosted MasjidFeed push service
 
 When the site delivers push through the hosted MasjidFeed service instead of
-its own Firebase project, registration works differently: the server forwards
-the App Check token to the push gateway, which verifies it against the central
-Firebase project and returns the site's canonical topic. The app subscribes to
-that topic client-side (Firebase Messaging `subscribeToTopic`); no FCM token
-is registered server-side, so `token` may be omitted.
+its own Firebase project, the server forwards the App Check token to the push
+gateway, which verifies it against the central Firebase project. Two
+registration flavors are available through the optional `registrationMode`
+parameter:
 
-Example response:
+- `server` (default): the FCM registration token is forwarded together with
+  the App Check token, and the gateway registers the token with the site's
+  canonical topic server-side (via FCM's Instance ID service). The token is
+  passed through and stored by neither the site nor the gateway. `token` is
+  required, as for the site-owned Firebase path.
+- `client`: the gateway returns only the site's canonical topic, and the app
+  subscribes to it itself (Firebase Messaging `subscribeToTopic`). `token`
+  is not required for this flavor.
+
+`client` mode answers with the `topicKey` payload:
 
 ```json
 {
-  "registered": true,
+  "registered": false,
   "topicKey": {
     "site_id": "ms_1a2b3c4d",
     "topic": "tenant_ms_1a2b3c4d_v1_8f4e2c",
@@ -230,6 +236,11 @@ Example response:
   }
 }
 ```
+
+In `client` mode the app subscribes to `topicKey.topic` itself; in `server`
+mode the registration already happened and subscribing client-side to the
+same topic is optional. Re-registering after a topic rotation moves the
+device onto the new topic under both flavors.
 
 A site configured for both delivery channels returns `result` and `topicKey`
 together. `DELETE /push/registrations` under the hosted service performs no

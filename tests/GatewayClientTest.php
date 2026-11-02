@@ -177,6 +177,46 @@ class GatewayClientTest extends TestCase {
         }
     }
 
+    public function test_register_device_forwards_app_check_site_id_and_token(): void {
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = ['site_id' => 'site-1'];
+        $gateway = $this->transport([
+            $this->response(200, ['site_id' => 'site-1', 'topic' => 'tenant_site-1_v1_secret', 'version' => 1, 'expires_at' => '2026-11-01T00:00:00Z']),
+        ]);
+
+        $key = $gateway->register_device('app-check-token-1', 'fcm-token-1234567890');
+
+        $this->assertSame('tenant_site-1_v1_secret', $key['topic']);
+        $request = $this->requests[0];
+        $this->assertSame('https://masjidfeed-app.gsf8.org/v1/devices', $request['url']);
+        $this->assertSame('app-check-token-1', $request['options']['headers']['X-Firebase-AppCheck']);
+        $this->assertSame(['site_id' => 'site-1', 'token' => 'fcm-token-1234567890'], json_decode($request['options']['body'], true));
+    }
+
+    public function test_register_device_requires_topic_in_response(): void {
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = ['site_id' => 'site-1'];
+        $gateway = $this->transport([
+            $this->response(200, ['site_id' => 'site-1']),
+        ]);
+
+        $this->expectException(Masjid_Feed_Gateway_Exception::class);
+        $gateway->register_device('app-check-token-1', 'fcm-token-1234567890');
+    }
+
+    public function test_register_device_maps_invalid_app_check(): void {
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = ['site_id' => 'site-1'];
+        $gateway = $this->transport([
+            $this->response(401, ['error' => ['code' => 'app_check', 'message' => 'invalid app check token']]),
+        ]);
+
+        try {
+            $gateway->register_device('bad-token', 'fcm-token-1234567890');
+            $this->fail('Expected an exception.');
+        } catch (Masjid_Feed_Gateway_Authentication_Error $exception) {
+            $this->assertSame('invalid app check token', $exception->getMessage());
+            $this->assertSame(401, $exception->http_status());
+        }
+    }
+
     public function test_send_posts_gateway_schema(): void {
         $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
             'site_id' => 'site-1',
@@ -205,7 +245,40 @@ class GatewayClientTest extends TestCase {
             'title' => 'Jumaat',
             'body' => '13:00',
             'deep_link' => 'masjidapp://open/v1/masjids/masjid-x/announcements/5',
+            'image' => '',
+            'masjid_id' => '',
+            'post_id' => '',
+            'type' => '',
         ], $body);
+    }
+
+    public function test_send_forwards_image_and_data_fields(): void {
+        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
+            'site_id' => 'site-1',
+            'secret' => 'secret-1',
+        ];
+        $gateway = $this->transport([
+            $this->response(200, ['send_id' => 'x']),
+        ]);
+
+        $gateway->send([
+            'title' => 'Jumaat',
+            'body' => '13:00',
+            'image' => 'https://example.org/photo.jpg',
+            'data' => [
+                'notificationId' => 'n-1',
+                'masjidId' => 'masjid-x',
+                'postId' => '5',
+                'type' => 'announcements',
+                'deepLink' => 'masjidapp://open/v1/masjids/masjid-x/announcements/5',
+            ],
+        ]);
+
+        $body = json_decode($this->requests[0]['options']['body'], true);
+        $this->assertSame('https://example.org/photo.jpg', $body['image']);
+        $this->assertSame('masjid-x', $body['masjid_id']);
+        $this->assertSame('5', $body['post_id']);
+        $this->assertSame('announcements', $body['type']);
     }
 
     public function test_send_truncates_long_titles_within_gateway_limit(): void {
@@ -277,7 +350,7 @@ class GatewayClientTest extends TestCase {
         }
 
         try {
-            $gateway->issue_topic_key('app-check-token-1');
+            $gateway->register_device('app-check-token-1', 'fcm-token-1234567890');
             $this->fail('Expected an exception.');
         } catch (Masjid_Feed_Gateway_Rate_Limited $exception) {
             $this->assertSame('daily_quota', $exception->error_code());
@@ -291,7 +364,7 @@ class GatewayClientTest extends TestCase {
         ]);
 
         try {
-            $gateway->issue_topic_key('app-check-token-1');
+            $gateway->register_device('app-check-token-1', 'fcm-token-1234567890');
             $this->fail('Expected an exception.');
         } catch (Masjid_Feed_Gateway_Exception $exception) {
             $this->assertSame('', $exception->error_code());
@@ -403,65 +476,6 @@ class GatewayClientTest extends TestCase {
 
         $this->expectException(Masjid_Feed_Gateway_Not_Found::class);
         $gateway->site_audit();
-    }
-
-    public function test_send_status_gets_the_message_record_preserving_slashes(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
-            'site_id' => 'site-1',
-            'secret' => 'secret-1',
-        ];
-        $record = ['name' => 'projects/masjidfeed/messages/abc-123', 'state' => 'accepted'];
-        $gateway = $this->transport([
-            $this->response(200, $record),
-        ]);
-
-        $result = $gateway->send_status('projects/masjidfeed/messages/abc-123');
-
-        $this->assertSame($record, $result);
-        $request = $this->requests[0];
-        $this->assertSame('GET', $request['method']);
-        // The send_id is an FCM message name containing slashes: it is part
-        // of the path verbatim, not percent-encoded into one segment.
-        $this->assertSame(
-            'https://masjidfeed-app.gsf8.org/v1/sites/site-1/messages/projects/masjidfeed/messages/abc-123',
-            $request['url']
-        );
-        $this->assertSame('Bearer secret-1', $request['options']['headers']['Authorization']);
-    }
-
-    public function test_send_status_maps_unknown_send(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
-            'site_id' => 'site-1',
-            'secret' => 'secret-1',
-        ];
-        $gateway = $this->transport([
-            $this->response(404, ['error' => ['code' => 'unknown_send', 'message' => 'no FCM record for this send_id']]),
-        ]);
-
-        try {
-            $gateway->send_status('projects/masjidfeed/messages/gone');
-            $this->fail('Expected an exception.');
-        } catch (Masjid_Feed_Gateway_Not_Found $exception) {
-            $this->assertSame('unknown_send', $exception->error_code());
-        }
-    }
-
-    public function test_send_status_rejects_unusable_send_ids(): void {
-        $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY] = [
-            'site_id' => 'site-1',
-            'secret' => 'secret-1',
-        ];
-        $gateway = $this->transport([]);
-
-        foreach (['', '  ', 'projects/x/messages/a?b', 'projects/x/messages/a#b'] as $send_id) {
-            try {
-                $gateway->send_status($send_id);
-                $this->fail('Expected an exception.');
-            } catch (Masjid_Feed_Gateway_Invalid_Request $exception) {
-                // No request may leave the plugin for an unusable send_id.
-                $this->assertCount(0, $this->requests);
-            }
-        }
     }
 
     public function test_send_requires_registration(): void {

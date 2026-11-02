@@ -21,7 +21,6 @@ class Masjid_Feed_Settings {
     const GATEWAY_CHALLENGE_OPTION = 'masjidfeed_gateway_challenge';
     const GATEWAY_FETCH_TOKEN_OPTION = 'masjidfeed_gateway_fetch_token';
     const GATEWAY_AUDIT_TRANSIENT = 'masjidfeed_gateway_audit';
-    const GATEWAY_SEND_STATUS_TRANSIENT = 'masjidfeed_gateway_send_status';
     const SETTINGS_SNAPSHOT_TRANSIENT = 'masjidfeed_settings_snapshot';
     const PUSH_MODE_DISABLED = 'disabled';
     const PUSH_MODE_MASJIDFEED = 'masjidfeed';
@@ -36,7 +35,6 @@ class Masjid_Feed_Settings {
         add_action('admin_post_masjidfeed_validate_gateway', array($this, 'handle_validate_gateway'));
         add_action('admin_post_masjidfeed_rotate_gateway_topic', array($this, 'handle_rotate_gateway_topic'));
         add_action('admin_post_masjidfeed_fetch_gateway_audit', array($this, 'handle_fetch_gateway_audit'));
-        add_action('admin_post_masjidfeed_gateway_send_status', array($this, 'handle_gateway_send_status'));
         add_action('admin_post_masjidfeed_validate_firebase', array($this, 'handle_validate_firebase'));
         add_action('admin_post_masjidfeed_test_push', array($this, 'handle_test_push'));
         add_action('admin_post_masjidfeed_toggle_api_tracing', array($this, 'handle_toggle_api_tracing'));
@@ -782,7 +780,7 @@ class Masjid_Feed_Settings {
                 <input type="hidden" name="action" value="masjidfeed_rotate_gateway_topic" />
                 <?php wp_nonce_field('masjidfeed_rotate_gateway_topic'); ?>
                 <p><?php submit_button(__('Rotate topic keys', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
-                <p class="description" style="max-width:900px;"><?php esc_html_e('Rotating makes the push service issue a new topic for this site and stop delivering to the old one after a grace window. Use this when a topic key may have leaked: devices re-subscribe automatically the next time they fetch a topic key (keys expire after 12 hours).', 'masjidfeed-app'); ?></p>
+                <p class="description" style="max-width:900px;"><?php esc_html_e('Rotating makes the push service issue a new topic for this site and stop delivering to the old one after a grace window. Use this when a topic may have leaked: devices re-register automatically the next time they register for push notifications.', 'masjidfeed-app'); ?></p>
             </form>
         <?php endif; ?>
 
@@ -1265,7 +1263,7 @@ class Masjid_Feed_Settings {
         $this->redirect_with_notice(
             rawurlencode(sprintf(
                 /* translators: %d: new topic version */
-                __('Topic keys rotated; the gateway issued version %1$d. Devices re-subscribe on their next topic-key fetch, and the previous version keeps receiving notifications during the rotation grace window.', 'masjidfeed-app'),
+                __('Topic keys rotated; the gateway issued version %1$d. Devices re-register on their next push-registration request, and the previous version keeps receiving notifications during the rotation grace window.', 'masjidfeed-app'),
                 $version
             )),
             'success',
@@ -1288,33 +1286,6 @@ class Masjid_Feed_Settings {
         }
         set_transient(self::GATEWAY_AUDIT_TRANSIENT, $entries, 5 * MINUTE_IN_SECONDS);
         $this->redirect_with_notice('gateway_audit_fetched', 'success', 'debug');
-    }
-
-    public function handle_gateway_send_status() {
-        check_admin_referer('masjidfeed_gateway_send_status');
-        if (!current_user_can('manage_options')) {
-            wp_die(esc_html__('You are not allowed to manage MasjidFeed App settings.', 'masjidfeed-app'));
-        }
-        if (!self::is_gateway_registered()) {
-            $this->redirect_with_notice('gateway_not_registered', 'error', 'debug');
-        }
-        global $wpdb;
-        $job_id = absint($_POST['job_id'] ?? 0);
-        $table = $wpdb->prefix . 'masjidfeed_push_jobs';
-        $sql = sprintf('SELECT * FROM %s WHERE id = %%d', esc_sql($table));
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- admin-only send-status lookup of the custom queue table; the table name is built from a fixed identifier and the parameter is prepared.
-        $job = $wpdb->get_row($wpdb->prepare($sql, $job_id));
-        $send_id = is_object($job) ? (string) $job->firebase_message_id : '';
-        if ('' === $send_id) {
-            $this->redirect_with_notice('gateway_send_status_missing', 'error', 'debug');
-        }
-        try {
-            $status = (new Masjid_Feed_Gateway())->send_status($send_id);
-        } catch (Throwable $exception) {
-            $this->redirect_with_notice(rawurlencode(substr($exception->getMessage(), 0, 300)), 'error', 'debug');
-        }
-        set_transient(self::GATEWAY_SEND_STATUS_TRANSIENT, array('send_id' => $send_id, 'record' => $status), 5 * MINUTE_IN_SECONDS);
-        $this->redirect_with_notice('gateway_send_status_fetched', 'success', 'debug');
     }
 
     /**
@@ -1599,8 +1570,6 @@ class Masjid_Feed_Settings {
                 'gateway_valid' => __('The push service accepted this site\'s credentials.', 'masjidfeed-app'),
                 'gateway_not_registered' => __('This site is not registered with the MasjidFeed push service.', 'masjidfeed-app'),
                 'gateway_audit_fetched' => __('Gateway audit trail fetched.', 'masjidfeed-app'),
-                'gateway_send_status_fetched' => __('Gateway send status fetched.', 'masjidfeed-app'),
-                'gateway_send_status_missing' => __('That notification has no send ID, so it was never delivered through the push service.', 'masjidfeed-app'),
             );
             echo '<div class="notice notice-' . esc_attr('error' === $notice_type ? 'error' : 'success') . '"><p>' . esc_html($messages[$notice] ?? rawurldecode($notice)) . '</p></div>';
         }
@@ -1698,10 +1667,9 @@ class Masjid_Feed_Settings {
     }
 
     /**
-     * Gateway debug tools: connection validation, the registration audit
-     * trail, and the delivery status of one queued send. Everything is
-     * fetched on demand (admin-post buttons); results are rendered from
-     * short-lived transients set by the handlers.
+     * Gateway debug tools: connection validation and the registration audit
+     * trail. Everything is fetched on demand (admin-post buttons); results
+     * are rendered from short-lived transients set by the handlers.
      */
     private function render_gateway_tools() {
         ?>
@@ -1712,7 +1680,7 @@ class Masjid_Feed_Settings {
         </form>
         <p class="description" style="max-width:900px;"><?php esc_html_e('Checks this site\'s registration with the hosted push service: the stored site ID and secret are verified against the gateway without sending any notification.', 'masjidfeed-app'); ?></p>
         <?php $this->render_gateway_audit_results(); ?>
-        <?php $this->render_gateway_send_status_result();
+        <?php
     }
 
     /**
@@ -1746,22 +1714,6 @@ class Masjid_Feed_Settings {
                 <?php endforeach; ?>
             </tbody>
         </table>
-        <?php
-    }
-
-    /**
-     * Show the FCM message record fetched by handle_gateway_send_status().
-     */
-    private function render_gateway_send_status_result() {
-        $result = get_transient(self::GATEWAY_SEND_STATUS_TRANSIENT);
-        delete_transient(self::GATEWAY_SEND_STATUS_TRANSIENT);
-        if (!is_array($result) || !isset($result['send_id'], $result['record'])) {
-            return;
-        }
-        ?>
-        <h4><?php esc_html_e('Send status', 'masjidfeed-app'); ?></h4>
-        <p class="description"><code><?php echo esc_html((string) $result['send_id']); ?></code></p>
-        <pre style="max-width:900px;overflow:auto;white-space:pre-wrap;"><?php echo esc_html(wp_json_encode($result['record'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)); ?></pre>
         <?php
     }
 
@@ -1826,10 +1778,18 @@ class Masjid_Feed_Settings {
         <?php
     }
 
+    /**
+     * Recent push jobs. The stored send ID is FCM's acceptance receipt for
+     * the channel it went out on; the Sent via column names that channel.
+     * There is deliberately no per-row status lookup: the FCM API has no
+     * per-message read method, so no endpoint can answer "what happened to
+     * this message" after the fact.
+     */
     private function render_recent_deliveries() {
         global $wpdb;
         ?>
         <h3><?php esc_html_e('Recent deliveries', 'masjidfeed-app'); ?></h3>
+        <p class="description" style="max-width:900px;"><?php esc_html_e('The send ID is FCM\'s acceptance receipt for the delivery — proof that FCM or the MasjidFeed push service accepted the message. Per-message delivery status is not available: the FCM API has no per-message lookup, and delivery reporting is aggregate only.', 'masjidfeed-app'); ?></p>
         <?php
         $table = $wpdb->prefix . 'masjidfeed_push_jobs';
         $sql = sprintf('SELECT * FROM %s ORDER BY created_at DESC LIMIT 50', esc_sql($table));
@@ -1839,9 +1799,14 @@ class Masjid_Feed_Settings {
             echo '<p>' . esc_html__('No notifications have been queued.', 'masjidfeed-app') . '</p>';
             return;
         }
-        echo '<table class="widefat striped"><thead><tr><th>' . esc_html__('Created', 'masjidfeed-app') . '</th><th>' . esc_html__('Post', 'masjidfeed-app') . '</th><th>' . esc_html__('Trigger', 'masjidfeed-app') . '</th><th>' . esc_html__('Status', 'masjidfeed-app') . '</th><th>' . esc_html__('Attempts', 'masjidfeed-app') . '</th><th>' . esc_html__('Result', 'masjidfeed-app') . '</th></tr></thead><tbody>';
+        $channel_labels = array(
+            Masjid_Feed_Settings::PUSH_MODE_MASJIDFEED => __('MasjidFeed push', 'masjidfeed-app'),
+            Masjid_Feed_Settings::PUSH_MODE_FCM => __('FCM (site\'s own Firebase project)', 'masjidfeed-app'),
+        );
+        echo '<table class="widefat striped"><thead><tr><th>' . esc_html__('Created', 'masjidfeed-app') . '</th><th>' . esc_html__('Post', 'masjidfeed-app') . '</th><th>' . esc_html__('Trigger', 'masjidfeed-app') . '</th><th>' . esc_html__('Status', 'masjidfeed-app') . '</th><th>' . esc_html__('Attempts', 'masjidfeed-app') . '</th><th>' . esc_html__('Sent via', 'masjidfeed-app') . '</th><th>' . esc_html__('Result', 'masjidfeed-app') . '</th></tr></thead><tbody>';
         foreach ($jobs as $job) {
-            echo '<tr><td>' . esc_html($job->created_at) . '</td><td><a href="' . esc_url(get_edit_post_link($job->post_id)) . '">#' . (int) $job->post_id . '</a></td><td>' . esc_html($job->trigger_type) . '</td><td>' . esc_html($job->status) . '</td><td>' . (int) $job->attempts . '</td><td>';
+            $channel = (string) ($job->channel ?? '');
+            echo '<tr><td>' . esc_html($job->created_at) . '</td><td><a href="' . esc_url(get_edit_post_link($job->post_id)) . '">#' . (int) $job->post_id . '</a></td><td>' . esc_html($job->trigger_type) . '</td><td>' . esc_html($job->status) . '</td><td>' . (int) $job->attempts . '</td><td>' . esc_html($channel_labels[$channel] ?? '—') . '</td><td>';
             if ('failed' === $job->status) {
                 echo esc_html($job->error_message);
                 echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '"><input type="hidden" name="action" value="masjidfeed_retry_push" /><input type="hidden" name="job_id" value="' . (int) $job->id . '" />';
@@ -1850,12 +1815,6 @@ class Masjid_Feed_Settings {
                 echo '</form>';
             } else {
                 echo esc_html($job->firebase_message_id ?: $job->error_message);
-            }
-            if ('' !== (string) $job->firebase_message_id) {
-                echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '"><input type="hidden" name="action" value="masjidfeed_gateway_send_status" /><input type="hidden" name="job_id" value="' . (int) $job->id . '" />';
-                wp_nonce_field('masjidfeed_gateway_send_status');
-                submit_button(__('Check status', 'masjidfeed-app'), 'link', 'submit', false);
-                echo '</form>';
             }
             echo '</td></tr>';
         }

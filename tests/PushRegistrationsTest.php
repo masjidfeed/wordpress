@@ -49,7 +49,32 @@ class PushRegistrationsTest extends TestCase {
         });
     }
 
-    public function test_masjidfeed_mode_proxies_registration_to_topic_key(): void {
+    public function test_masjidfeed_mode_proxies_registration_to_devices(): void {
+        $this->store_settings([
+            'push_mode' => 'masjidfeed',
+            'push_enabled' => 1,
+        ]);
+        $this->store_gateway(['site_id' => 'site-1']);
+        $api = $this->api($this->gateway_transport([
+            ['status' => 200, 'headers' => [], 'body' => json_encode(['site_id' => 'site-1', 'topic' => 'tenant_site-1_v1_secret', 'version' => 1, 'expires_at' => '2026-11-01T00:00:00Z'])],
+        ]));
+        $request = $this->rest_request('POST');
+        $request->set_param('token', 'current-fcm-token-1234567890');
+
+        $response = $api->register_push_token($request);
+
+        $this->assertInstanceOf(WP_REST_Response::class, $response);
+        $data = $response->get_data();
+        $this->assertTrue($data['registered']);
+        $this->assertSame('tenant_site-1_v1_secret', $data['topicKey']['topic']);
+        $this->assertArrayNotHasKey('result', $data);
+        $gateway_request = $this->gateway_requests[0];
+        $this->assertSame('https://masjidfeed-app.gsf8.org/v1/devices', $gateway_request['url']);
+        $this->assertSame('app-check-token', $gateway_request['options']['headers']['X-Firebase-AppCheck']);
+        $this->assertSame(['site_id' => 'site-1', 'token' => 'current-fcm-token-1234567890'], json_decode($gateway_request['options']['body'], true));
+    }
+
+    public function test_masjidfeed_mode_requires_a_token_for_device_registration(): void {
         $this->store_settings([
             'push_mode' => 'masjidfeed',
             'push_enabled' => 1,
@@ -61,18 +86,13 @@ class PushRegistrationsTest extends TestCase {
 
         $response = $api->register_push_token($this->rest_request('POST'));
 
-        $this->assertInstanceOf(WP_REST_Response::class, $response);
-        $data = $response->get_data();
-        $this->assertTrue($data['registered']);
-        $this->assertSame('tenant_site-1_v1_secret', $data['topicKey']['topic']);
-        $this->assertArrayNotHasKey('result', $data);
-        $request = $this->gateway_requests[0];
-        $this->assertSame('https://masjidfeed-app.gsf8.org/v1/topic-key', $request['url']);
-        $this->assertSame('app-check-token', $request['options']['headers']['X-Firebase-AppCheck']);
-        $this->assertSame(['site_id' => 'site-1'], json_decode($request['options']['body'], true));
+        $this->assertTrue(is_wp_error($response));
+        $this->assertSame('masjidfeed_fcm_token_required', $response->get_error_code());
+        $this->assertSame(400, $response->get_error_data()['status']);
+        $this->assertCount(0, $this->gateway_requests);
     }
 
-    public function test_masjidfeed_mode_maps_topic_key_failures(): void {
+    public function test_masjidfeed_mode_maps_device_registration_failures(): void {
         $this->store_settings([
             'push_mode' => 'masjidfeed',
             'push_enabled' => 1,
@@ -81,11 +101,79 @@ class PushRegistrationsTest extends TestCase {
         $api = $this->api($this->gateway_transport([
             ['status' => 401, 'headers' => [], 'body' => json_encode(['error' => ['code' => 'app_check', 'message' => 'invalid app check token']])],
         ]));
+        $request = $this->rest_request('POST');
+        $request->set_param('token', 'current-fcm-token-1234567890');
 
-        $response = $api->register_push_token($this->rest_request('POST'));
+        $response = $api->register_push_token($request);
 
         $this->assertTrue(is_wp_error($response));
         $this->assertSame('invalid app check token', $response->get_error_message());
+    }
+
+    public function test_masjidfeed_mode_client_registration_proxies_to_topic_key(): void {
+        $this->store_settings([
+            'push_mode' => 'masjidfeed',
+            'push_enabled' => 1,
+        ]);
+        $this->store_gateway(['site_id' => 'site-1']);
+        $api = $this->api($this->gateway_transport([
+            ['status' => 200, 'headers' => [], 'body' => json_encode(['site_id' => 'site-1', 'topic' => 'tenant_site-1_v1_secret', 'version' => 1, 'expires_at' => '2026-11-01T00:00:00Z'])],
+        ]));
+        $request = $this->rest_request('POST');
+        $request->set_param('registrationMode', 'client');
+
+        $response = $api->register_push_token($request);
+
+        $this->assertInstanceOf(WP_REST_Response::class, $response);
+        $data = $response->get_data();
+        $this->assertTrue($data['registered']);
+        $this->assertSame('tenant_site-1_v1_secret', $data['topicKey']['topic']);
+        $this->assertArrayNotHasKey('result', $data);
+        $gateway_request = $this->gateway_requests[0];
+        $this->assertSame('https://masjidfeed-app.gsf8.org/v1/topic-key', $gateway_request['url']);
+        $this->assertSame('app-check-token', $gateway_request['options']['headers']['X-Firebase-AppCheck']);
+        $this->assertSame(['site_id' => 'site-1'], json_decode($gateway_request['options']['body'], true));
+    }
+
+    public function test_masjidfeed_mode_client_registration_needs_no_token(): void {
+        $this->store_settings([
+            'push_mode' => 'masjidfeed',
+            'push_enabled' => 1,
+        ]);
+        $this->store_gateway(['site_id' => 'site-1']);
+        $api = $this->api($this->gateway_transport([
+            ['status' => 200, 'headers' => [], 'body' => json_encode(['site_id' => 'site-1', 'topic' => 'tenant_site-1_v1_secret', 'version' => 1, 'expires_at' => '2026-11-01T00:00:00Z'])],
+        ]));
+        // No token param at all: client-side registration only needs the
+        // canonical topic.
+        $request = $this->rest_request('POST');
+        $request->set_param('registrationMode', 'client');
+
+        $response = $api->register_push_token($request);
+
+        $this->assertInstanceOf(WP_REST_Response::class, $response);
+        $this->assertSame('tenant_site-1_v1_secret', $response->get_data()['topicKey']['topic']);
+    }
+
+    public function test_both_mode_client_registration_needs_no_token(): void {
+        $this->store_settings([
+            'push_mode' => 'both',
+            'push_enabled' => 1,
+        ]);
+        $this->store_gateway(['site_id' => 'site-1']);
+        $api = $this->api($this->gateway_transport([
+            ['status' => 200, 'headers' => [], 'body' => json_encode(['site_id' => 'site-1', 'topic' => 'tenant_site-1_v1_secret', 'version' => 1, 'expires_at' => '2026-11-01T00:00:00Z'])],
+        ]));
+        $request = $this->rest_request('POST');
+        $request->set_param('registrationMode', 'client');
+
+        $response = $api->register_push_token($request);
+
+        $data = $response->get_data();
+        $this->assertTrue($data['registered']);
+        $this->assertSame('tenant_site-1_v1_secret', $data['topicKey']['topic']);
+        $this->assertArrayNotHasKey('result', $data);
+        $this->assertSame('https://masjidfeed-app.gsf8.org/v1/topic-key', $this->gateway_requests[0]['url']);
     }
 
     public function test_masjidfeed_mode_authorization_skips_local_firebase(): void {
@@ -146,7 +234,7 @@ class PushRegistrationsTest extends TestCase {
         $this->assertSame(array('successful' => true, 'errorCount' => 0), $data['result']);
     }
 
-    public function test_both_mode_fcm_token_is_required_for_the_fcm_half(): void {
+    public function test_both_mode_fcm_token_is_required_for_both_halves(): void {
         $this->store_settings([
             'push_mode' => 'both',
             'push_enabled' => 1,
@@ -170,9 +258,9 @@ class PushRegistrationsTest extends TestCase {
 
         $response = $api->register_push_token($request);
 
-        $data = $response->get_data();
-        $this->assertTrue($data['registered']);
-        $this->assertArrayHasKey('topicKey', $data);
-        $this->assertArrayNotHasKey('result', $data);
+        $this->assertTrue(is_wp_error($response));
+        $this->assertSame('masjidfeed_fcm_token_required', $response->get_error_code());
+        $this->assertSame(400, $response->get_error_data()['status']);
+        $this->assertCount(0, $this->gateway_requests);
     }
 }

@@ -157,27 +157,44 @@ class Masjid_Feed_REST_API {
     public function register_push_token($request) {
         $mode = Masjid_Feed_Settings::push_mode();
         $app_check_token = trim((string) $request->get_header('x-firebase-appcheck'));
+        $registration_mode = $this->registration_mode($request);
+        $token = trim((string) $request->get_param('token'));
         $response = array('registered' => true);
         $attempts = 0;
         $failures = array();
 
         if (in_array($mode, array(Masjid_Feed_Settings::PUSH_MODE_MASJIDFEED, Masjid_Feed_Settings::PUSH_MODE_BOTH), true)) {
             $attempts++;
-            try {
-                $response['topicKey'] = $this->gateway_client()->issue_topic_key($app_check_token);
-            } catch (Masjid_Feed_Gateway_Exception $exception) {
-                $failures[] = $this->gateway_error($exception, 'masjidfeed_topic_key_failed', __('The push service did not issue a topic key.', 'masjidfeed-app'));
+            if ('client' === $registration_mode) {
+                // Client-side subscribe: the app asks for the canonical
+                // topic and subscribes itself, so no token is needed here.
+                try {
+                    $response['topicKey'] = $this->gateway_client()->issue_topic_key($app_check_token);
+                } catch (Masjid_Feed_Gateway_Exception $exception) {
+                    $failures[] = $this->gateway_error($exception, 'masjidfeed_topic_key_failed', __('The push service did not issue a topic key.', 'masjidfeed-app'));
+                }
+            } elseif ('' === $token) {
+                // Server-side registration: the FCM token is handed to the
+                // gateway, which subscribes it via FCM's Instance ID service.
+                $failures[] = new WP_Error('masjidfeed_fcm_token_required', __('An FCM token is required to register for push notifications.', 'masjidfeed-app'), array('status' => 400));
+            } else {
+                try {
+                    $response['topicKey'] = $this->gateway_client()->register_device($app_check_token, $token);
+                } catch (Masjid_Feed_Gateway_Exception $exception) {
+                    $failures[] = $this->gateway_error($exception, 'masjidfeed_device_registration_failed', __('The push service did not register the device.', 'masjidfeed-app'));
+                }
             }
         }
 
         if (in_array($mode, array(Masjid_Feed_Settings::PUSH_MODE_FCM, Masjid_Feed_Settings::PUSH_MODE_BOTH), true)
             && $this->authorized_firebase instanceof Masjid_Feed_Firebase) {
             $attempts++;
-            $token = trim((string) $request->get_param('token'));
-            $previous_token = trim((string) $request->get_param('previousToken'));
             if ('' === $token) {
+                // The site's own Firebase half always subscribes the token
+                // server-side.
                 $failures[] = new WP_Error('masjidfeed_fcm_token_required', __('An FCM token is required to register for push notifications.', 'masjidfeed-app'), array('status' => 400));
             } else {
+                $previous_token = trim((string) $request->get_param('previousToken'));
                 try {
                     $result = $this->authorized_firebase->subscribe($token);
                     if ($previous_token && !hash_equals($token, $previous_token)) {
@@ -198,10 +215,21 @@ class Masjid_Feed_REST_API {
         return new WP_REST_Response($response, 200);
     }
 
+    /**
+     * Registration flavor requested by the client: "server" (default) hands
+     * the FCM token to the gateway for server-side topic registration;
+     * "client" returns the canonical topic for the app to subscribe to
+     * itself. Anything but an explicit "client" is treated as "server".
+     */
+    private function registration_mode($request) {
+        return 'client' === strtolower(trim((string) $request->get_param('registrationMode'))) ? 'client' : 'server';
+    }
+
     public function unregister_push_token($request) {
-        // Topic subscriptions are managed client-side against the
-        // gateway-issued topic; without a local Firebase configuration there
-        // is nothing to unregister server-side.
+        // Registrations under the hosted gateway live in FCM's Instance ID
+        // service and the gateway exposes no unsubscribe endpoint; without a
+        // local Firebase configuration there is nothing to unregister
+        // server-side.
         if (!($this->authorized_firebase instanceof Masjid_Feed_Firebase)) {
             return new WP_REST_Response(array('registered' => false), 200);
         }
@@ -598,7 +626,7 @@ class Masjid_Feed_REST_API {
         $mode = Masjid_Feed_Settings::push_mode();
         if (Masjid_Feed_Settings::PUSH_MODE_MASJIDFEED === $mode) {
             // The gateway verifies the App Check token against the central
-            // Firebase project when the topic key is requested.
+            // Firebase project when the device registration is proxied.
             return true;
         }
 
@@ -852,9 +880,10 @@ class Masjid_Feed_REST_API {
         $args = array(
             'masjidId' => array('required' => true, 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field'),
             'platform' => array('required' => true, 'type' => 'string', 'enum' => array('ios', 'android')),
-            // Optional at the route level: MasjidFeed mode registers through
-            // the gateway topic key and needs no token. The FCM half enforces
-            // it when it runs.
+            // Optional at the route level so a missing token gets the
+            // handler's masjidfeed_fcm_token_required error; the gateway's
+            // server mode and the site's own Firebase half enforce it when
+            // they run, while client-side registration needs no token.
             'token' => array(
                 'required' => false,
                 'type' => 'string',
@@ -863,6 +892,17 @@ class Masjid_Feed_REST_API {
             ),
         );
         if ($include_previous_token) {
+            // Registration flavor for the hosted MasjidFeed gateway:
+            // "server" (default) registers the FCM token via the gateway,
+            // "client" returns the canonical topic for the app to subscribe
+            // to itself. Ignored by the DELETE route.
+            $args['registrationMode'] = array(
+                'required' => false,
+                'type' => 'string',
+                'enum' => array('client', 'server'),
+                'default' => 'server',
+                'sanitize_callback' => 'sanitize_text_field',
+            );
             $args['previousToken'] = array(
                 'required' => false,
                 'type' => 'string',

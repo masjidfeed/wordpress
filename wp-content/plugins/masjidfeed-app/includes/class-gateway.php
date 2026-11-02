@@ -192,23 +192,57 @@ class Masjid_Feed_Gateway {
     }
 
     /**
-     * Proxy the app's topic-key request to the gateway. The gateway verifies
-     * the App Check token against the central Firebase project and returns
-     * the canonical topic the app subscribes to client-side.
+     * Proxy the app's client-side subscription: the gateway verifies the
+     * App Check token against the central Firebase project and returns the
+     * canonical topic for the app to subscribe to itself via
+     * FirebaseMessaging.subscribeToTopic.
      */
     public function issue_topic_key(string $app_check_token): array {
         $site_id = Masjid_Feed_Settings::gateway_site_id();
         if ('' === $site_id) {
             throw new Masjid_Feed_Gateway_Exception(__('This site is not registered with the MasjidFeed push service.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
         }
-        $data = $this->request(
-            'POST',
+        return $this->app_check_topic_request(
             '/v1/topic-key',
-            array('X-Firebase-AppCheck' => $app_check_token),
-            array('site_id' => $site_id)
+            $app_check_token,
+            array('site_id' => $site_id),
+            __('The push service did not issue a topic key.', 'masjidfeed-app')
         );
+    }
+
+    /**
+     * Proxy the app's device registration to the gateway. The gateway
+     * verifies the App Check token against the central Firebase project and
+     * subscribes the app's FCM registration token to the site's canonical
+     * topic server-side via FCM's Instance ID service; the token is passed
+     * through and stored nowhere. Both registration paths answer with the
+     * topic-key shape, so the app keeps re-requesting on the same cadence —
+     * after a rotation the next registration moves the device onto the new
+     * topic.
+     */
+    public function register_device(string $app_check_token, string $fcm_token): array {
+        $site_id = Masjid_Feed_Settings::gateway_site_id();
+        if ('' === $site_id) {
+            throw new Masjid_Feed_Gateway_Exception(__('This site is not registered with the MasjidFeed push service.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+        }
+        return $this->app_check_topic_request(
+            '/v1/devices',
+            $app_check_token,
+            array('site_id' => $site_id, 'token' => $fcm_token),
+            __('The push service did not register the device.', 'masjidfeed-app')
+        );
+    }
+
+    /**
+     * Shared App-Check-gated topic call: /v1/topic-key and /v1/devices both
+     * answer with the topic-key shape; a response without a topic is
+     * incomplete and must fail loudly instead of looking like a successful
+     * registration.
+     */
+    private function app_check_topic_request(string $path, string $app_check_token, array $body, string $failure_message): array {
+        $data = $this->request('POST', $path, array('X-Firebase-AppCheck' => $app_check_token), $body);
         if (empty($data['topic'])) {
-            throw new Masjid_Feed_Gateway_Exception(__('The push service returned no topic key.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
+            throw new Masjid_Feed_Gateway_Exception($failure_message); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
         }
         return $data;
     }
@@ -245,7 +279,15 @@ class Masjid_Feed_Gateway {
                 'notification_id' => (string) ($payload['data']['notificationId'] ?? ''),
                 'title' => $title,
                 'body' => $body,
+                // The remaining fields mirror the direct-FCM message so both
+                // channels carry identical properties: the gateway maps them
+                // onto notification.image, the APNs rich-push block, and the
+                // camelCase data keys the app reads.
                 'deep_link' => (string) ($payload['data']['deepLink'] ?? ''),
+                'image' => (string) ($payload['image'] ?? ''),
+                'masjid_id' => (string) ($payload['data']['masjidId'] ?? ''),
+                'post_id' => (string) ($payload['data']['postId'] ?? ''),
+                'type' => (string) ($payload['data']['type'] ?? ''),
             )
         );
         $send_id = (string) ($data['send_id'] ?? '');
@@ -268,7 +310,7 @@ class Masjid_Feed_Gateway {
     /**
      * Rotate this site's topic keys: the gateway issues a new topic secret
      * and bumps the version. Devices pick up the new topic on their next
-     * topic-key fetch, and sends keep fanning out to the previous version
+     * registration call, and sends keep fanning out to the previous version
      * for the rotation grace window. Returns the new topic version.
      */
     public function rotate_topic(): int {
@@ -289,24 +331,9 @@ class Masjid_Feed_Gateway {
     }
 
     /**
-     * Look up the FCM message record for a send this site made. The gateway
-     * strips the topic field (it contains the per-site topic secret) before
-     * responding, and 404s when the send never happened or aged out of
-     * FCM's retention. The send_id is an FCM message name and may contain
-     * slashes, so it is appended to the path verbatim.
-     */
-    public function send_status(string $send_id): array {
-        $send_id = trim($send_id);
-        if ('' === $send_id || preg_match('/[?#]/', $send_id)) {
-            throw new Masjid_Feed_Gateway_Invalid_Request(__('The stored send ID is not a valid message name.', 'masjidfeed-app')); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- internal control-flow exception; any display escapes the message.
-        }
-        return $this->authorized_request('GET', '/messages/' . $send_id, null);
-    }
-
-    /**
-     * Call a bearer-authenticated site endpoint: /validate, /rotate,
-     * /audit, or /messages/... under /v1/sites/{site_id}. Requires a
-     * completed registration; $body is omitted for the GET endpoints.
+     * Call a bearer-authenticated site endpoint: /validate, /rotate, or
+     * /audit under /v1/sites/{site_id}. Requires a completed registration;
+     * $body is omitted for the GET endpoints.
      */
     private function authorized_request(string $method, string $suffix, ?array $body): array {
         $site_id = Masjid_Feed_Settings::gateway_site_id();
