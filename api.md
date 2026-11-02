@@ -242,8 +242,10 @@ mode the registration already happened and subscribing client-side to the
 same topic is optional. Re-registering after a topic rotation moves the
 device onto the new topic under both flavors.
 
-A site configured for both delivery channels returns `result` and `topicKey`
-together. `DELETE /push/registrations` under the hosted service performs no
+A site configured for both delivery channels adds the site-Firebase `result`
+to whichever payload the hosted service produced (`registered: true`, or
+`registered: false` with `topicKey`). `DELETE /push/registrations` under the
+hosted service performs no
 server-side action and always answers `{"registered": false}`: unsubscription
 happens client-side against the topic from `topicKey`.
 

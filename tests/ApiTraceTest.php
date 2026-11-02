@@ -30,7 +30,7 @@ class ApiTraceTest extends TestCase {
         $request = $this->registration_request();
         $trace->start_trace(null, null, $request);
         $response = new WP_REST_Response([
-            'registered' => true,
+            'registered' => false,
             'topicKey' => [
                 'site_id' => 'ms_1a2b3c4d',
                 'topic' => 'tenant_ms_1a2b3c4d_v1_8f4e2c',
@@ -44,7 +44,7 @@ class ApiTraceTest extends TestCase {
         $entries = Masjid_Feed_API_Trace::get_entries();
         $this->assertCount(1, $entries);
         $this->assertSame(200, $entries[0]['status']);
-        $this->assertSame('1', $entries[0]['payload']['registered']);
+        $this->assertSame('', $entries[0]['payload']['registered']);
         $this->assertSame('tenant_ms_1a2b3c4d_v1_8f4e2c', $entries[0]['payload']['topicKey']['topic']);
         $this->assertSame('ms_1a2b3c4d', $entries[0]['payload']['topicKey']['site_id']);
         $this->assertSame('1', $entries[0]['payload']['topicKey']['version']);

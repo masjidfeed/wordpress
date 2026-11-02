@@ -65,9 +65,9 @@ class PushRegistrationsTest extends TestCase {
 
         $this->assertInstanceOf(WP_REST_Response::class, $response);
         $data = $response->get_data();
-        $this->assertTrue($data['registered']);
-        $this->assertSame('tenant_site-1_v1_secret', $data['topicKey']['topic']);
-        $this->assertArrayNotHasKey('result', $data);
+        // Server-side registration: the token is subscribed at the gateway,
+        // so the response carries no topic.
+        $this->assertSame(array('registered' => true), $data);
         $gateway_request = $this->gateway_requests[0];
         $this->assertSame('https://masjidfeed-app.gsf8.org/v1/devices', $gateway_request['url']);
         $this->assertSame('app-check-token', $gateway_request['options']['headers']['X-Firebase-AppCheck']);
@@ -126,7 +126,9 @@ class PushRegistrationsTest extends TestCase {
 
         $this->assertInstanceOf(WP_REST_Response::class, $response);
         $data = $response->get_data();
-        $this->assertTrue($data['registered']);
+        // Client-side registration registers nothing server-side, so the
+        // app is told to subscribe itself to the topic.
+        $this->assertFalse($data['registered']);
         $this->assertSame('tenant_site-1_v1_secret', $data['topicKey']['topic']);
         $this->assertArrayNotHasKey('result', $data);
         $gateway_request = $this->gateway_requests[0];
@@ -152,7 +154,9 @@ class PushRegistrationsTest extends TestCase {
         $response = $api->register_push_token($request);
 
         $this->assertInstanceOf(WP_REST_Response::class, $response);
-        $this->assertSame('tenant_site-1_v1_secret', $response->get_data()['topicKey']['topic']);
+        $data = $response->get_data();
+        $this->assertFalse($data['registered']);
+        $this->assertSame('tenant_site-1_v1_secret', $data['topicKey']['topic']);
     }
 
     public function test_both_mode_client_registration_needs_no_token(): void {
@@ -170,7 +174,7 @@ class PushRegistrationsTest extends TestCase {
         $response = $api->register_push_token($request);
 
         $data = $response->get_data();
-        $this->assertTrue($data['registered']);
+        $this->assertFalse($data['registered']);
         $this->assertSame('tenant_site-1_v1_secret', $data['topicKey']['topic']);
         $this->assertArrayNotHasKey('result', $data);
         $this->assertSame('https://masjidfeed-app.gsf8.org/v1/topic-key', $this->gateway_requests[0]['url']);
@@ -204,7 +208,7 @@ class PushRegistrationsTest extends TestCase {
         $this->assertSame('Firebase mobile application configuration is incomplete.', $response->get_error_message());
     }
 
-    public function test_both_mode_merges_topic_key_and_fcm_results(): void {
+    public function test_both_mode_server_registration_merges_with_fcm_result(): void {
         $this->store_settings([
             'push_mode' => 'both',
             'push_enabled' => 1,
@@ -229,7 +233,40 @@ class PushRegistrationsTest extends TestCase {
         $response = $api->register_push_token($request);
 
         $data = $response->get_data();
+        // Server-side registration: no topic is returned, only the
+        // site-Firebase half's result joins the payload.
         $this->assertTrue($data['registered']);
+        $this->assertArrayNotHasKey('topicKey', $data);
+        $this->assertSame(array('successful' => true, 'errorCount' => 0), $data['result']);
+    }
+
+    public function test_both_mode_client_registration_merges_topic_key_and_fcm_result(): void {
+        $this->store_settings([
+            'push_mode' => 'both',
+            'push_enabled' => 1,
+        ]);
+        $this->store_gateway(['site_id' => 'site-1']);
+        $api = $this->api($this->gateway_transport([
+            ['status' => 200, 'headers' => [], 'body' => json_encode(['site_id' => 'site-1', 'topic' => 'tenant_site-1_v1_secret', 'version' => 1, 'expires_at' => '2026-11-01T00:00:00Z'])],
+        ]));
+        $fcm = new class extends Masjid_Feed_Firebase {
+            public function __construct() {
+            }
+
+            public function subscribe($token) {
+                return array('errors' => array());
+            }
+        };
+        $property = new ReflectionProperty(Masjid_Feed_REST_API::class, 'authorized_firebase');
+        $property->setValue($api, $fcm);
+        $request = $this->rest_request('POST');
+        $request->set_param('registrationMode', 'client');
+        $request->set_param('token', 'current-fcm-token-1234567890');
+
+        $response = $api->register_push_token($request);
+
+        $data = $response->get_data();
+        $this->assertFalse($data['registered']);
         $this->assertSame('tenant_site-1_v1_secret', $data['topicKey']['topic']);
         $this->assertSame(array('successful' => true, 'errorCount' => 0), $data['result']);
     }

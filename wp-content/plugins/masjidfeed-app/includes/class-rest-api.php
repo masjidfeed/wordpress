@@ -166,8 +166,10 @@ class Masjid_Feed_REST_API {
         if (in_array($mode, array(Masjid_Feed_Settings::PUSH_MODE_MASJIDFEED, Masjid_Feed_Settings::PUSH_MODE_BOTH), true)) {
             $attempts++;
             if ('client' === $registration_mode) {
-                // Client-side subscribe: the app asks for the canonical
-                // topic and subscribes itself, so no token is needed here.
+                // Client-side subscribe: nothing is registered server-side,
+                // so the app is told to subscribe itself to the canonical
+                // topic; no token is needed here.
+                $response['registered'] = false;
                 try {
                     $response['topicKey'] = $this->gateway_client()->issue_topic_key($app_check_token);
                 } catch (Masjid_Feed_Gateway_Exception $exception) {
@@ -179,7 +181,10 @@ class Masjid_Feed_REST_API {
                 $failures[] = new WP_Error('masjidfeed_fcm_token_required', __('An FCM token is required to register for push notifications.', 'masjidfeed-app'), array('status' => 400));
             } else {
                 try {
-                    $response['topicKey'] = $this->gateway_client()->register_device($app_check_token, $token);
+                    // Server-side registration: the token is subscribed at
+                    // the gateway, so the response stays {"registered": true}
+                    // and carries no topic.
+                    $this->gateway_client()->register_device($app_check_token, $token);
                 } catch (Masjid_Feed_Gateway_Exception $exception) {
                     $failures[] = $this->gateway_error($exception, 'masjidfeed_device_registration_failed', __('The push service did not register the device.', 'masjidfeed-app'));
                 }
