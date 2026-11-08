@@ -113,6 +113,8 @@ Example response:
     "events": true,
     "announcements": true,
     "donations": true,
+    "ramadan": true,
+    "parking": true,
     "qibla": true,
     "prayerReminders": true
   },
@@ -139,6 +141,13 @@ Example response:
 All URL and contact values are strings and may be empty. `logoUrl` and
 `splashLogoUrl` are empty strings when no image is configured. `ramadanUrl` is
 an empty string when no Ramadan page is configured.
+
+`endpoints.parkingUrl` is never empty. Its format is
+`{siteUrl}/wp-json/masjid/v1/parking-config`: an absolute URL for
+`GET /parking-config` (see [Parking Map](#parking-map)). Unlike
+`donationUrl` and `ramadanUrl`, Content-only Rendering never rewrites it, and
+it carries no query parameters. Clients should fetch the parking document from
+this URL as returned instead of constructing it.
 
 When Content-only Rendering is enabled under **Settings > Masjid App**, a
 non-empty `donationUrl` or `ramadanUrl` automatically includes
@@ -642,10 +651,7 @@ password protected.
 
 Returns the parking map document consumed by the ICOB app: the mosque's
 location, the parking zone outlines, and the schedules during which
-restrictions apply. The data is maintained by site administrators on the
-plugin's Parking settings tab; the endpoint returns `404` with error code
-`masjidfeed_parking_config_missing` while nothing has been saved, and the app
-falls back to its built-in copy on any non-200 response.
+restrictions apply.
 
 ```sh
 curl --fail-with-body --silent --show-error \
