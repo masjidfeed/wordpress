@@ -70,7 +70,8 @@ class Masjid_Feed_Settings {
      * Effective push delivery mode. Reads the raw stored option (not the
      * defaults-merged array) so installs saved before the mode dropdown
      * existed keep their behaviour: the old checkbox only controlled custom
-     * FCM delivery. Fresh installs default to the hosted MasjidFeed service.
+     * FCM delivery. Fresh installs default to disabled — an admin must
+     * explicitly pick a delivery channel.
      *
      * @param array|null $opts Raw stored settings; read from the option when null.
      */
@@ -86,7 +87,20 @@ class Masjid_Feed_Settings {
         if (array_key_exists('push_enabled', $opts)) {
             return !empty($opts['push_enabled']) ? self::PUSH_MODE_FCM : self::PUSH_MODE_DISABLED;
         }
-        return self::PUSH_MODE_MASJIDFEED;
+        return self::PUSH_MODE_DISABLED;
+    }
+
+    /**
+     * True when every Firebase artefact needed for direct FCM delivery and
+     * device registration is stored: the encrypted service account plus the
+     * iOS and Android client configurations. Same bar the /config response
+     * reports as pushNotifications.configured.
+     */
+    public static function is_fcm_configured() {
+        $opts = self::get_all_options();
+        return Masjid_Feed_Credential_Store::has_credentials()
+            && !empty($opts['firebase_ios_config'])
+            && !empty($opts['firebase_android_config']);
     }
 
     /**
@@ -203,7 +217,6 @@ class Masjid_Feed_Settings {
             'whatsapp' => '',
             'feature_events' => 1,
             'feature_announcements' => 1,
-            'feature_donations' => 1,
             'feature_qibla' => 1,
             'feature_prayer_reminders' => 1,
             'content_only_rendering_enabled' => 0,
@@ -214,8 +227,7 @@ class Masjid_Feed_Settings {
             'announcements_tags' => array(),
             'friday_announcements_category' => 0,
             'push_enabled' => 0,
-            'push_mode' => self::PUSH_MODE_MASJIDFEED,
-            'push_tag' => 0,
+            'push_mode' => self::PUSH_MODE_DISABLED,
             'push_deep_link_template' => '',
             'firebase_project_id' => '',
             'firebase_ios_config' => array(),
@@ -309,18 +321,10 @@ class Masjid_Feed_Settings {
     }
 
     private function events_source_js() {
-        $flag_id = 'masjidfeed_flag_feature_events';
         return "jQuery(function(\$) {\n"
             . "    var source = \$('#masjidfeed_events_source');\n"
-            . "    var flag = \$('#" . $flag_id . "');\n"
             . "    function sync() {\n"
-            . "        var value = source.val();\n"
-            . "        var none = '' === value;\n"
-            . "        var isTec = 'the_events_calendar' === value;\n"
-            . "        flag.prop('disabled', none);\n"
-            . "        if (none) {\n"
-            . "            flag.prop('checked', false);\n"
-            . "        }\n"
+            . "        var isTec = 'the_events_calendar' === source.val();\n"
             . "        \$('[data-for-default]').toggle(!isTec).find('input[type=checkbox]').prop('disabled', isTec);\n"
             . "        \$('[data-for-tec]').toggle(isTec).find('input[type=checkbox]').prop('disabled', !isTec);\n"
             . "    }\n"
@@ -403,14 +407,14 @@ class Masjid_Feed_Settings {
 
         $out['events_source'] = $this->sanitize_events_source($input);
 
-        foreach (array('feature_events', 'feature_announcements', 'feature_donations', 'feature_qibla', 'feature_prayer_reminders') as $flag) {
+        foreach (array('feature_announcements', 'feature_qibla', 'feature_prayer_reminders') as $flag) {
             $out[$flag] = !empty($input[$flag]) ? 1 : 0;
         }
         $out['content_only_rendering_enabled'] = !empty($input['content_only_rendering_enabled']) ? 1 : 0;
 
-        if ('' === $out['events_source']) {
-            $out['feature_events'] = 0;
-        }
+        // The Events flag has no checkbox: it is on exactly when an events
+        // plugin is selected and off when the selector reads None.
+        $out['feature_events'] = '' === $out['events_source'] ? 0 : 1;
 
         foreach (array('events_categories', 'events_tags', 'announcements_categories', 'announcements_tags') as $tax_field) {
             $out[$tax_field] = isset($input[$tax_field]) && is_array($input[$tax_field])
@@ -451,7 +455,6 @@ class Masjid_Feed_Settings {
         // Legacy consumers (queue gating, /config, device registration) keep
         // reading push_enabled, so derive it from the selected mode.
         $out['push_enabled'] = self::PUSH_MODE_DISABLED === $mode ? 0 : 1;
-        $out['push_tag'] = absint($input['push_tag'] ?? 0);
         $out['push_deep_link_template'] = $this->sanitize_deep_link_template(
             $input['push_deep_link_template'] ?? '',
             $existing['push_deep_link_template'] ?? ''
@@ -487,7 +490,7 @@ class Masjid_Feed_Settings {
                 <?php
                 $tabs = array(
                     'general' => __('General', 'masjidfeed-app'),
-                    'push' => __('Push', 'masjidfeed-app'),
+                    'push' => __('Notifications', 'masjidfeed-app'),
                     'parking' => __('Parking', 'masjidfeed-app'),
                     'debug' => __('Debug', 'masjidfeed-app'),
                 );
@@ -637,20 +640,16 @@ class Masjid_Feed_Settings {
             <table class="form-table" role="presentation">
                 <?php
                 $flags = array(
-                    'feature_events' => __('Events', 'masjidfeed-app'),
-                    'feature_announcements' => __('Announcements', 'masjidfeed-app'),
-                    'feature_donations' => __('Donations', 'masjidfeed-app'),
                     'feature_qibla' => __('Qibla', 'masjidfeed-app'),
                     'feature_prayer_reminders' => __('Prayer Reminders', 'masjidfeed-app'),
                 );
                 foreach ($flags as $key => $label) :
-                    $events_flag_disabled = ('feature_events' === $key && '' === $events_source);
                     ?>
                     <tr>
                         <th scope="row"><?php echo esc_html($label); ?></th>
                         <td>
                             <label>
-                                <input type="checkbox" id="masjidfeed_flag_<?php echo esc_attr($key); ?>" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[<?php echo esc_attr($key); ?>]" value="1" <?php checked(!empty($opts[$key]) && !$events_flag_disabled); ?> <?php disabled($events_flag_disabled); ?> />
+                                <input type="checkbox" id="masjidfeed_flag_<?php echo esc_attr($key); ?>" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[<?php echo esc_attr($key); ?>]" value="1" <?php checked(!empty($opts[$key])); ?> />
                                 <?php esc_html_e('Enabled', 'masjidfeed-app'); ?>
                             </label>
                         </td>
@@ -687,7 +686,7 @@ class Masjid_Feed_Settings {
                             <?php endforeach; ?>
                         </select>
                         <?php if ('' === $events_source) : ?>
-                            <p class="description"><?php esc_html_e('No events plugin is selected, so the Events feature flag is disabled.', 'masjidfeed-app'); ?></p>
+                            <p class="description"><?php esc_html_e('No events plugin is selected, so the Events feature is disabled.', 'masjidfeed-app'); ?></p>
                         <?php endif; ?>
                     </td>
                 </tr>
@@ -710,12 +709,24 @@ class Masjid_Feed_Settings {
                 </tr>
             </table>
 
-            <h2><?php esc_html_e('Announcements Filter', 'masjidfeed-app'); ?></h2>
-            <p class="description"><?php esc_html_e('Only posts in the selected categories/tags will be included as announcements. Leave empty to include all posts.', 'masjidfeed-app'); ?></p>
+            <h2><?php esc_html_e('Announcements', 'masjidfeed-app'); ?></h2>
             <table class="form-table" role="presentation">
                 <tr>
+                    <th scope="row"><?php esc_html_e('Enable announcements', 'masjidfeed-app'); ?></th>
+                    <td>
+                        <label>
+                            <input type="checkbox" id="masjidfeed_flag_feature_announcements" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[feature_announcements]" value="1" <?php checked(!empty($opts['feature_announcements'])); ?> />
+                            <?php esc_html_e('Enabled', 'masjidfeed-app'); ?>
+                        </label>
+                        <p class="description"><?php esc_html_e('Shows announcements in the mobile app.', 'masjidfeed-app'); ?></p>
+                    </td>
+                </tr>
+                <tr>
                     <th scope="row"><?php esc_html_e('Categories', 'masjidfeed-app'); ?></th>
-                    <td><?php $this->render_term_checkboxes($categories, 'announcements_categories', $opts['announcements_categories']); ?></td>
+                    <td>
+                        <p class="description"><?php esc_html_e('Only posts in the selected categories/tags will be included as announcements. Leave empty to include all posts.', 'masjidfeed-app'); ?></p>
+                        <?php $this->render_term_checkboxes($categories, 'announcements_categories', $opts['announcements_categories']); ?>
+                    </td>
                 </tr>
                 <tr>
                     <th scope="row"><?php esc_html_e('Tags', 'masjidfeed-app'); ?></th>
@@ -740,78 +751,29 @@ class Masjid_Feed_Settings {
         <?php
     }
 
-    private function render_push_tab($opts, $tags) {
+    private function render_push_tab($opts) {
         $mode = self::push_mode();
         $fcm_section_open = in_array($mode, array(self::PUSH_MODE_FCM, self::PUSH_MODE_BOTH), true);
+        $masjidfeed_configured = self::is_gateway_registered();
+        $fcm_configured = self::is_fcm_configured();
         ?>
         <h2 id="push-notifications"><?php esc_html_e('Push Notifications', 'masjidfeed-app'); ?></h2>
-
-        <h3><?php esc_html_e('MasjidFeed push service', 'masjidfeed-app'); ?></h3>
-        <p class="description" style="max-width:900px;"><?php esc_html_e('Delivers notifications through the hosted MasjidFeed gateway, which holds the Firebase credentials for the MasjidApp apps. Registering verifies this site\'s domain and stores the issued secret in the settings; no Firebase project of your own is required.', 'masjidfeed-app'); ?></p>
-        <?php $pending = self::is_gateway_pending(); ?>
-        <table class="form-table" role="presentation">
-            <tr>
-                <th scope="row"><?php esc_html_e('Registration', 'masjidfeed-app'); ?></th>
-                <td>
-                    <?php if (self::is_gateway_registered()) : ?>
-                        <p><strong><?php esc_html_e('Registered.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html(self::gateway_site_id()); ?></code></p>
-                    <?php elseif ($pending) : ?>
-                        <p><strong><?php esc_html_e('Pending.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html(self::gateway_site_id()); ?></code></p>
-                    <?php else : ?>
-                        <p><strong><?php esc_html_e('Not registered.', 'masjidfeed-app'); ?></strong></p>
-                    <?php endif; ?>
-                </td>
-            </tr>
-        </table>
-        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-            <input type="hidden" name="action" value="masjidfeed_register_gateway" />
-            <?php wp_nonce_field('masjidfeed_register_gateway'); ?>
-            <p><?php submit_button($pending ? __('Validate', 'masjidfeed-app') : __('Register with MasjidFeed', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
-            <p class="description" style="max-width:900px;"><?php
-                if ($pending) {
-                    esc_html_e('Registration is pending: the push service could not verify this site\'s domain when it registered. Make sure the WordPress REST API is publicly reachable, then press Validate to retry — the push service re-fetches the challenge from the gateway-verification endpoint using this registration\'s fetch token (POST /v1/sites/{site_id}/verify). The pending registration expires 24 hours after it was created.', 'masjidfeed-app');
-                } else {
-                    esc_html_e('Registration publishes a one-time challenge at the gateway-verification REST endpoint, served only to the push service when it presents this registration’s fetch token; the service fetches it to verify this domain and issues the secret stored in the settings. If the service cannot reach this site, registration stays pending and pressing the button again retries verification.', 'masjidfeed-app');
-                }
-            ?></p>
-        </form>
-        <?php if (self::is_gateway_registered()) : ?>
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                <input type="hidden" name="action" value="masjidfeed_rotate_gateway_topic" />
-                <?php wp_nonce_field('masjidfeed_rotate_gateway_topic'); ?>
-                <p><?php submit_button(__('Rotate topic keys', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
-                <p class="description" style="max-width:900px;"><?php esc_html_e('Rotating makes the push service issue a new topic for this site and stop delivering to the old one after a grace window. Use this when a topic may have leaked: devices re-register automatically the next time they register for push notifications.', 'masjidfeed-app'); ?></p>
-            </form>
-        <?php endif; ?>
 
         <form method="post" action="options.php" enctype="multipart/form-data">
             <?php settings_fields(self::PUSH_OPTION_GROUP); ?>
             <input type="hidden" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[_tab]" value="push" />
 
-            <h3><?php esc_html_e('Delivery', 'masjidfeed-app'); ?></h3>
             <table class="form-table" role="presentation">
                 <tr>
                     <th scope="row"><label for="masjidfeed_push_mode"><?php esc_html_e('Push notifications', 'masjidfeed-app'); ?></label></th>
                     <td>
                         <select id="masjidfeed_push_mode" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[push_mode]">
                             <option value="<?php echo esc_attr(self::PUSH_MODE_DISABLED); ?>" <?php selected($mode, self::PUSH_MODE_DISABLED); ?>><?php esc_html_e('Disabled', 'masjidfeed-app'); ?></option>
-                            <option value="<?php echo esc_attr(self::PUSH_MODE_MASJIDFEED); ?>" <?php selected($mode, self::PUSH_MODE_MASJIDFEED); ?>><?php esc_html_e('MasjidFeed', 'masjidfeed-app'); ?></option>
-                            <option value="<?php echo esc_attr(self::PUSH_MODE_FCM); ?>" <?php selected($mode, self::PUSH_MODE_FCM); ?>><?php esc_html_e('FCM', 'masjidfeed-app'); ?></option>
-                            <option value="<?php echo esc_attr(self::PUSH_MODE_BOTH); ?>" <?php selected($mode, self::PUSH_MODE_BOTH); ?>><?php esc_html_e('Both', 'masjidfeed-app'); ?></option>
+                            <option value="<?php echo esc_attr(self::PUSH_MODE_MASJIDFEED); ?>" <?php selected($mode, self::PUSH_MODE_MASJIDFEED); ?> <?php disabled(!$masjidfeed_configured); ?>><?php esc_html_e('MasjidFeed', 'masjidfeed-app'); ?></option>
+                            <option value="<?php echo esc_attr(self::PUSH_MODE_FCM); ?>" <?php selected($mode, self::PUSH_MODE_FCM); ?> <?php disabled(!$fcm_configured); ?>><?php esc_html_e('FCM', 'masjidfeed-app'); ?></option>
+                            <option value="<?php echo esc_attr(self::PUSH_MODE_BOTH); ?>" <?php selected($mode, self::PUSH_MODE_BOTH); ?> <?php disabled(!$masjidfeed_configured || !$fcm_configured); ?>><?php esc_html_e('Both', 'masjidfeed-app'); ?></option>
                         </select>
-                        <p class="description"><?php esc_html_e('MasjidFeed delivers through the hosted push service registered above. FCM delivers through your own Firebase project configured below. Both delivers through both channels.', 'masjidfeed-app'); ?></p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="masjidfeed_push_tag"><?php esc_html_e('Trigger tag', 'masjidfeed-app'); ?></label></th>
-                    <td>
-                        <select id="masjidfeed_push_tag" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[push_tag]">
-                            <option value="0"><?php esc_html_e('Select a tag', 'masjidfeed-app'); ?></option>
-                            <?php foreach ($tags as $tag) : ?>
-                                <option value="<?php echo (int) $tag->term_id; ?>" <?php selected((int) $opts['push_tag'], (int) $tag->term_id); ?>><?php echo esc_html($tag->name); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <p class="description"><?php esc_html_e('A post sends once when first published with this tag. Tagged published posts can also be sent manually.', 'masjidfeed-app'); ?></p>
+                        <p class="description"><?php esc_html_e('MasjidFeed delivers through the hosted push service registered below. FCM delivers through your own Firebase project configured below. Both delivers through both channels. A channel that is not configured yet is disabled until its setup is complete.', 'masjidfeed-app'); ?></p>
                     </td>
                 </tr>
                 <tr>
@@ -905,6 +867,43 @@ class Masjid_Feed_Settings {
 
             <?php submit_button(); ?>
         </form>
+
+        <p class="description" style="max-width:900px;"><?php esc_html_e('The MasjidFeed push service delivers notifications through the hosted MasjidFeed gateway, which holds the Firebase credentials for the MasjidApp apps. Registering verifies this site\'s domain and stores the issued secret in the settings; no Firebase project of your own is required.', 'masjidfeed-app'); ?></p>
+        <?php $pending = self::is_gateway_pending(); ?>
+        <table class="form-table" role="presentation">
+            <tr>
+                <th scope="row"><?php esc_html_e('Registration', 'masjidfeed-app'); ?></th>
+                <td>
+                    <?php if (self::is_gateway_registered()) : ?>
+                        <p><strong><?php esc_html_e('Registered.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html(self::gateway_site_id()); ?></code></p>
+                    <?php elseif ($pending) : ?>
+                        <p><strong><?php esc_html_e('Pending.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html(self::gateway_site_id()); ?></code></p>
+                    <?php else : ?>
+                        <p><strong><?php esc_html_e('Not registered.', 'masjidfeed-app'); ?></strong></p>
+                    <?php endif; ?>
+                </td>
+            </tr>
+        </table>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+            <input type="hidden" name="action" value="masjidfeed_register_gateway" />
+            <?php wp_nonce_field('masjidfeed_register_gateway'); ?>
+            <p><?php submit_button($pending ? __('Validate', 'masjidfeed-app') : __('Register with MasjidFeed', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
+            <p class="description" style="max-width:900px;"><?php
+                if ($pending) {
+                    esc_html_e('Registration is pending: the push service could not verify this site\'s domain when it registered. Make sure the WordPress REST API is publicly reachable, then press Validate to retry — the push service re-fetches the challenge from the gateway-verification endpoint using this registration\'s fetch token (POST /v1/sites/{site_id}/verify). The pending registration expires 24 hours after it was created.', 'masjidfeed-app');
+                } else {
+                    esc_html_e('Registration publishes a one-time challenge at the gateway-verification REST endpoint, served only to the push service when it presents this registration’s fetch token; the service fetches it to verify this domain and issues the secret stored in the settings. If the service cannot reach this site, registration stays pending and pressing the button again retries verification.', 'masjidfeed-app');
+                }
+            ?></p>
+        </form>
+        <?php if (self::is_gateway_registered()) : ?>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <input type="hidden" name="action" value="masjidfeed_rotate_gateway_topic" />
+                <?php wp_nonce_field('masjidfeed_rotate_gateway_topic'); ?>
+                <p><?php submit_button(__('Rotate topic keys', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
+                <p class="description" style="max-width:900px;"><?php esc_html_e('Rotating makes the push service issue a new topic for this site and stop delivering to the old one after a grace window. Use this when a topic may have leaked: devices re-register automatically the next time they register for push notifications.', 'masjidfeed-app'); ?></p>
+            </form>
+        <?php endif; ?>
         <?php
     }
 

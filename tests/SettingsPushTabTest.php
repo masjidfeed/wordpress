@@ -19,7 +19,7 @@ class SettingsPushTabTest extends TestCase {
         $settings = new Masjid_Feed_Settings();
         ob_start();
         $method = new ReflectionMethod(Masjid_Feed_Settings::class, 'render_push_tab');
-        $method->invoke($settings, Masjid_Feed_Settings::get_all_options(), []);
+        $method->invoke($settings, Masjid_Feed_Settings::get_all_options());
         return (string) ob_get_clean();
     }
 
@@ -91,8 +91,9 @@ class SettingsPushTabTest extends TestCase {
         $this->assertStringNotContainsString('masjidfeed_rotate_gateway_topic', $html);
         // The pending button retries verification (POST
         // /v1/sites/{site_id}/verify with the stored fetch token) instead of
-        // registering again, and the description explains the retry.
-        $this->assertSame('Validate', $GLOBALS['__test_submit_buttons'][0]['text']);
+        // registering again, and the description explains the retry. The
+        // settings form's save button precedes it.
+        $this->assertSame('Validate', $GLOBALS['__test_submit_buttons'][1]['text']);
         $this->assertStringContainsString('gateway-verification', $html);
         $this->assertStringContainsString('24 hours', $html);
     }
@@ -100,7 +101,10 @@ class SettingsPushTabTest extends TestCase {
     public function test_push_tab_shows_register_button_when_not_pending(): void {
         $this->render_push_tab();
 
-        $this->assertSame('Register with MasjidFeed', $GLOBALS['__test_submit_buttons'][0]['text']);
+        // The settings form's save button comes first; the registration
+        // button follows it.
+        $this->assertNull($GLOBALS['__test_submit_buttons'][0]['text']);
+        $this->assertSame('Register with MasjidFeed', $GLOBALS['__test_submit_buttons'][1]['text']);
 
         $this->store_gateway(['site_id' => 'site-1', 'secret' => 'secret-1']);
         $GLOBALS['__test_submit_buttons'] = [];
@@ -108,8 +112,8 @@ class SettingsPushTabTest extends TestCase {
 
         // The registration button keeps its label once registered; the
         // rotate button follows it.
-        $this->assertSame('Register with MasjidFeed', $GLOBALS['__test_submit_buttons'][0]['text']);
-        $this->assertSame('Rotate topic keys', $GLOBALS['__test_submit_buttons'][1]['text']);
+        $this->assertSame('Register with MasjidFeed', $GLOBALS['__test_submit_buttons'][1]['text']);
+        $this->assertSame('Rotate topic keys', $GLOBALS['__test_submit_buttons'][2]['text']);
     }
 
     public function test_gateway_pending_reflects_stored_state(): void {
@@ -123,8 +127,74 @@ class SettingsPushTabTest extends TestCase {
         $this->assertTrue(Masjid_Feed_Settings::is_gateway_registered());
     }
 
-    public function test_push_mode_defaults_to_masjidfeed_for_fresh_installs(): void {
-        $this->assertSame('masjidfeed', Masjid_Feed_Settings::push_mode());
+    public function test_push_mode_defaults_to_disabled_for_fresh_installs(): void {
+        $this->assertSame('disabled', Masjid_Feed_Settings::push_mode());
+    }
+
+    public function test_push_tab_renders_mode_dropdown_first_and_drops_trigger_tag(): void {
+        $html = $this->render_push_tab();
+
+        // The dropdown is the first control on the tab: it appears before the
+        // hosted-service registration form and its description.
+        $dropdown_at = strpos($html, 'masjidfeed_push_mode');
+        $registration_at = strpos($html, 'masjidfeed_register_gateway');
+        $this->assertNotFalse($dropdown_at);
+        $this->assertNotFalse($registration_at);
+        $this->assertLessThan($registration_at, $dropdown_at);
+        // The trigger tag is gone: any post can send once push is enabled.
+        $this->assertStringNotContainsString('masjidfeed_push_tag', $html);
+        $this->assertStringNotContainsString('Trigger tag', $html);
+        // The removed section headers stay gone.
+        $this->assertStringNotContainsString('MasjidFeed push service</h3>', $html);
+        $this->assertStringNotContainsString('Delivery</h3>', $html);
+        // The registration block follows the settings form.
+        $this->assertStringContainsString('masjidfeed_register_gateway', $html);
+    }
+
+    private function mode_option(string $html, string $mode): string {
+        if (preg_match('/<option value="' . $mode . '"[^>]*>/', $html, $matches)) {
+            return $matches[0];
+        }
+        return '';
+    }
+
+    public function test_push_tab_disables_unconfigured_channels(): void {
+        $html = $this->render_push_tab();
+
+        // Fresh state: neither the hosted service nor FCM is configured, so
+        // only Disabled can be selected.
+        $this->assertStringNotContainsString("disabled='disabled'", $this->mode_option($html, 'disabled'));
+        $this->assertStringContainsString("disabled='disabled'", $this->mode_option($html, 'masjidfeed'));
+        $this->assertStringContainsString("disabled='disabled'", $this->mode_option($html, 'fcm'));
+        $this->assertStringContainsString("disabled='disabled'", $this->mode_option($html, 'both'));
+        $this->assertStringContainsString("selected='selected'", $this->mode_option($html, 'disabled'));
+
+        // Registering the hosted service enables MasjidFeed; Both stays
+        // disabled until FCM is configured too.
+        $this->store_gateway(['site_id' => 'site-1', 'secret' => 'secret-1']);
+        $html = $this->render_push_tab();
+        $this->assertStringNotContainsString("disabled='disabled'", $this->mode_option($html, 'masjidfeed'));
+        $this->assertStringContainsString("disabled='disabled'", $this->mode_option($html, 'fcm'));
+        $this->assertStringContainsString("disabled='disabled'", $this->mode_option($html, 'both'));
+
+        // With FCM fully configured every channel is selectable.
+        $GLOBALS['__test_options'][MASJIDFEED_CREDENTIAL_OPTION_KEY] = 'stored-credentials';
+        $this->store_settings(['firebase_ios_config' => ['appId' => 'ios'], 'firebase_android_config' => ['appId' => 'android']]);
+        $html = $this->render_push_tab();
+        foreach (array('disabled', 'masjidfeed', 'fcm', 'both') as $mode) {
+            $this->assertStringNotContainsString("disabled='disabled'", $this->mode_option($html, $mode));
+        }
+    }
+
+    public function test_is_fcm_configured_requires_all_three_firebase_artifacts(): void {
+        $this->assertFalse(Masjid_Feed_Settings::is_fcm_configured());
+
+        $GLOBALS['__test_options'][MASJIDFEED_CREDENTIAL_OPTION_KEY] = 'stored-credentials';
+        $this->store_settings(['firebase_ios_config' => ['appId' => 'ios']]);
+        $this->assertFalse(Masjid_Feed_Settings::is_fcm_configured());
+
+        $this->store_settings(['firebase_ios_config' => ['appId' => 'ios'], 'firebase_android_config' => ['appId' => 'android']]);
+        $this->assertTrue(Masjid_Feed_Settings::is_fcm_configured());
     }
 
     public function test_push_mode_derives_from_legacy_checkbox(): void {

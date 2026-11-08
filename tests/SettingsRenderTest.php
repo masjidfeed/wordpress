@@ -48,4 +48,36 @@ class SettingsRenderTest extends TestCase {
 
         $this->assertStringContainsString('data-for-default', $html);
     }
+
+    public function test_general_tab_drops_events_donations_and_feature_flag_announcements(): void {
+        $html = $this->render_general_tab($this->base_options());
+
+        // The Events flag has no checkbox: it derives from the Events Plugin
+        // selector. Donations derives from the donation URL. The
+        // announcements flag moved under its own section.
+        $this->assertStringNotContainsString('[feature_events]', $html);
+        $this->assertStringNotContainsString('[feature_donations]', $html);
+        $this->assertStringNotContainsString('Announcements Filter', $html);
+
+        // Qibla and Prayer Reminders remain configurable flags.
+        $this->assertStringContainsString('[feature_qibla]', $html);
+        $this->assertStringContainsString('[feature_prayer_reminders]', $html);
+    }
+
+    public function test_announcements_section_holds_the_enable_flag(): void {
+        $html = $this->render_general_tab($this->base_options());
+
+        $this->assertStringContainsString('Enable announcements', $html);
+        $this->assertStringContainsString('[feature_announcements]', $html);
+        // The checkbox lives in the Announcements section, after the section
+        // header and before the filter controls.
+        $header_at = strpos($html, 'Announcements</h2>');
+        $flag_at = strpos($html, '[feature_announcements]');
+        $categories_at = strpos($html, 'Friday Category');
+        $this->assertNotFalse($header_at);
+        $this->assertNotFalse($flag_at);
+        $this->assertNotFalse($categories_at);
+        $this->assertLessThan($flag_at, $header_at);
+        $this->assertLessThan($categories_at, $flag_at);
+    }
 }

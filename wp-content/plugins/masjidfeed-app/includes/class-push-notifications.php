@@ -58,7 +58,7 @@ class Masjid_Feed_Push_Notifications {
     }
 
     public function enqueue_first_publish($post_id) {
-        if ($this->post_is_eligible($post_id)) {
+        if ($this->post_is_eligible()) {
             $this->enqueue($post_id, 'publish', 'publish:' . $post_id);
         }
     }
@@ -157,12 +157,17 @@ class Masjid_Feed_Push_Notifications {
     }
 
     public function render_meta_box($post) {
-        if (!$this->post_is_eligible($post->ID)) {
-            echo '<p>' . esc_html__('Assign the configured push tag to enable notifications.', 'masjidfeed-app') . '</p>';
-            return;
-        }
         if ('publish' !== $post->post_status) {
             echo '<p>' . esc_html__('Publish this post before sending a notification.', 'masjidfeed-app') . '</p>';
+            return;
+        }
+        if (!$this->post_is_eligible()) {
+            echo '<p><button type="button" class="button" disabled>' . esc_html__('Send notification', 'masjidfeed-app') . '</button></p>';
+            $settings_url = wp_nonce_url(
+                admin_url('options-general.php?page=' . Masjid_Feed_Settings::PAGE_SLUG . '&tab=push'),
+                Masjid_Feed_Settings::VIEW_NONCE_ACTION
+            );
+            echo '<p class="description"><a href="' . esc_url($settings_url) . '">' . esc_html__('Push notifications are disabled — enable them in MasjidFeed App settings.', 'masjidfeed-app') . '</a></p>';
             return;
         }
         $url = wp_nonce_url(admin_url('admin-post.php?action=masjidfeed_resend_push&post_id=' . $post->ID), 'masjidfeed_resend_push_' . $post->ID);
@@ -175,8 +180,8 @@ class Masjid_Feed_Push_Notifications {
             wp_die(esc_html__('You are not allowed to send this notification.', 'masjidfeed-app'));
         }
         $post = get_post($post_id);
-        if (!$post || 'publish' !== $post->post_status || !$this->post_is_eligible($post_id)) {
-            wp_die(esc_html__('Only tagged, published posts can send notifications.', 'masjidfeed-app'));
+        if (!$post || 'publish' !== $post->post_status || !$this->post_is_eligible()) {
+            wp_die(esc_html__('Only published posts can send notifications while push notifications are enabled.', 'masjidfeed-app'));
         }
         $this->enqueue($post_id, 'manual');
         wp_safe_redirect(get_edit_post_link($post_id, 'raw'));
@@ -196,12 +201,12 @@ class Masjid_Feed_Push_Notifications {
         exit;
     }
 
-    private function post_is_eligible($post_id) {
-        if (Masjid_Feed_Settings::PUSH_MODE_DISABLED === Masjid_Feed_Settings::push_mode()) {
-            return false;
-        }
-        $tag_id = absint(Masjid_Feed_Settings::get_option('push_tag'));
-        return $tag_id && has_term($tag_id, 'post_tag', $post_id);
+    /**
+     * Any published post can send a notification: eligibility no longer
+     * depends on a trigger tag, only on push notifications being enabled.
+     */
+    private function post_is_eligible() {
+        return Masjid_Feed_Settings::PUSH_MODE_DISABLED !== Masjid_Feed_Settings::push_mode();
     }
 
     private function is_event_post($post) {

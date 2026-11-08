@@ -75,6 +75,24 @@ class SettingsEventsSourceTest extends TestCase {
         $this->assertSame(1, $out['feature_announcements']);
     }
 
+    public function test_events_feature_flag_is_derived_from_the_selected_plugin(): void {
+        // The Events checkbox no longer exists, so a stale form value cannot
+        // keep the flag on: the flag follows the Events Plugin selector.
+        $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = $this->stored_options(['feature_events' => 0]);
+
+        $out = $this->sanitize([
+            '_tab' => 'general',
+            'events_source' => 'the_events_calendar',
+        ]);
+        $this->assertSame(1, $out['feature_events']);
+
+        $out = $this->sanitize([
+            '_tab' => 'general',
+            'events_source' => '',
+        ]);
+        $this->assertSame(0, $out['feature_events']);
+    }
+
     public function test_sanitize_keeps_events_feature_flag_with_selected_plugin(): void {
         $GLOBALS['__test_options'][MASJIDFEED_OPTION_KEY] = $this->stored_options();
 

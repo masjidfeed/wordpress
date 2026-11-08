@@ -21,7 +21,7 @@ class Masjid_Feed_REST_API {
     const MAX_LIMIT = 100;
     const CLIENT_CACHE_TTL = 60;
     const SERVER_CACHE_TTL = DAY_IN_SECONDS;
-    const CONFIG_CACHE_KEY = 'masjidfeed_config_response_v7';
+    const CONFIG_CACHE_KEY = 'masjidfeed_config_response_v8';
     const CONFIG_SHARED_CACHE_TTL = HOUR_IN_SECONDS;
     const EVENTS_CACHE_KEY = 'masjidfeed_events_response_v9';
     const EVENTS_SHARED_CACHE_TTL = 5 * MINUTE_IN_SECONDS;
@@ -323,7 +323,12 @@ class Masjid_Feed_REST_API {
             'featureFlags' => array(
                 'events' => (bool) $opts['feature_events'] && null !== Masjid_Feed_Event_Sources::get_source($opts['events_source']),
                 'announcements' => (bool) $opts['feature_announcements'],
-                'donations' => (bool) $opts['feature_donations'],
+                'pushNotifications' => Masjid_Feed_Settings::PUSH_MODE_DISABLED !== Masjid_Feed_Settings::push_mode(),
+                // Derived from the configuration they unlock: a feature flag
+                // is true exactly when its URL or document is configured.
+                'donations' => '' !== $donation_url,
+                'ramadan' => '' !== $ramadan_url,
+                'parking' => null !== Masjid_Feed_Parking_Config::get_saved_document(),
                 'qibla' => (bool) $opts['feature_qibla'],
                 'prayerReminders' => (bool) $opts['feature_prayer_reminders'],
             ),
