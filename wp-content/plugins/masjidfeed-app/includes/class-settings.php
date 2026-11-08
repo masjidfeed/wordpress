@@ -305,6 +305,7 @@ class Masjid_Feed_Settings {
         wp_add_inline_script('media-editor', $this->events_source_js());
         wp_add_inline_script('media-editor', $this->push_mode_js());
         wp_add_inline_script('wp-color-picker', $this->color_picker_js());
+        wp_add_inline_script('jquery', $this->preview_js());
     }
 
     private function push_mode_js() {
@@ -455,10 +456,16 @@ class Masjid_Feed_Settings {
         // Legacy consumers (queue gating, /config, device registration) keep
         // reading push_enabled, so derive it from the selected mode.
         $out['push_enabled'] = self::PUSH_MODE_DISABLED === $mode ? 0 : 1;
-        $out['push_deep_link_template'] = $this->sanitize_deep_link_template(
-            $input['push_deep_link_template'] ?? '',
-            $existing['push_deep_link_template'] ?? ''
-        );
+        // The tab saves through two forms — the delivery form (mode and deep
+        // link) and the FCM setup form. A submission that does not carry the
+        // deep-link field keeps the stored template; an empty field still
+        // clears it.
+        if (array_key_exists('push_deep_link_template', $input)) {
+            $out['push_deep_link_template'] = $this->sanitize_deep_link_template(
+                $input['push_deep_link_template'],
+                $existing['push_deep_link_template'] ?? ''
+            );
+        }
         $out['firebase_project_id'] = sanitize_text_field($existing['firebase_project_id'] ?? '');
         $out['firebase_ios_config'] = is_array($existing['firebase_ios_config'] ?? null) ? $existing['firebase_ios_config'] : array();
         $out['firebase_android_config'] = is_array($existing['firebase_android_config'] ?? null) ? $existing['firebase_android_config'] : array();
@@ -474,7 +481,7 @@ class Masjid_Feed_Settings {
 
         $nonce = isset($_GET['_wpnonce']) ? sanitize_text_field(wp_unslash($_GET['_wpnonce'])) : '';
         $current_tab = isset($_GET['tab']) ? sanitize_key(wp_unslash($_GET['tab'])) : 'general';
-        if (!in_array($current_tab, array('general', 'push', 'parking', 'debug'), true)
+        if (!in_array($current_tab, array('general', 'push', 'parking', 'preview', 'debug'), true)
             || !wp_verify_nonce($nonce, self::VIEW_NONCE_ACTION)) {
             $current_tab = 'general';
         }
@@ -492,6 +499,7 @@ class Masjid_Feed_Settings {
                     'general' => __('General', 'masjidfeed-app'),
                     'push' => __('Notifications', 'masjidfeed-app'),
                     'parking' => __('Parking', 'masjidfeed-app'),
+                    'preview' => __('Preview', 'masjidfeed-app'),
                     'debug' => __('Debug', 'masjidfeed-app'),
                 );
                 foreach ($tabs as $tab => $label) :
@@ -505,9 +513,11 @@ class Masjid_Feed_Settings {
             </nav>
             <?php
             if ('push' === $current_tab) {
-                $this->render_push_tab($opts, $tags);
+                $this->render_push_tab($opts);
             } elseif ('parking' === $current_tab) {
                 $this->render_parking_tab();
+            } elseif ('preview' === $current_tab) {
+                $this->render_preview_tab();
             } elseif ('debug' === $current_tab) {
                 $this->render_settings_snapshot();
                 $this->render_api_trace_tools();
@@ -785,6 +795,50 @@ class Masjid_Feed_Settings {
                 </tr>
             </table>
 
+            <?php submit_button(); ?>
+        </form>
+
+        <p class="description" style="max-width:900px;"><?php esc_html_e('The MasjidFeed push service delivers notifications through the hosted MasjidFeed gateway, which holds the Firebase credentials for the MasjidApp apps. Registering verifies this site\'s domain and stores the issued secret in the settings; no Firebase project of your own is required.', 'masjidfeed-app'); ?></p>
+        <?php $pending = self::is_gateway_pending(); ?>
+        <table class="form-table" role="presentation">
+            <tr>
+                <th scope="row"><?php esc_html_e('Registration', 'masjidfeed-app'); ?></th>
+                <td>
+                    <?php if (self::is_gateway_registered()) : ?>
+                        <p><strong><?php esc_html_e('Registered.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html(self::gateway_site_id()); ?></code></p>
+                    <?php elseif ($pending) : ?>
+                        <p><strong><?php esc_html_e('Pending.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html(self::gateway_site_id()); ?></code></p>
+                    <?php else : ?>
+                        <p><strong><?php esc_html_e('Not registered.', 'masjidfeed-app'); ?></strong></p>
+                    <?php endif; ?>
+                </td>
+            </tr>
+        </table>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+            <input type="hidden" name="action" value="masjidfeed_register_gateway" />
+            <?php wp_nonce_field('masjidfeed_register_gateway'); ?>
+            <p><?php submit_button($pending ? __('Validate', 'masjidfeed-app') : __('Register with MasjidFeed', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
+            <p class="description" style="max-width:900px;"><?php
+                if ($pending) {
+                    esc_html_e('Registration is pending: the push service could not verify this site\'s domain when it registered. Make sure the WordPress REST API is publicly reachable, then press Validate to retry — the push service re-fetches the challenge from the gateway-verification endpoint using this registration\'s fetch token (POST /v1/sites/{site_id}/verify). The pending registration expires 24 hours after it was created.', 'masjidfeed-app');
+                } else {
+                    esc_html_e('Registration publishes a one-time challenge at the gateway-verification REST endpoint, served only to the push service when it presents this registration’s fetch token; the service fetches it to verify this domain and issues the secret stored in the settings. If the service cannot reach this site, registration stays pending and pressing the button again retries verification.', 'masjidfeed-app');
+                }
+            ?></p>
+        </form>
+        <?php if (self::is_gateway_registered()) : ?>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <input type="hidden" name="action" value="masjidfeed_rotate_gateway_topic" />
+                <?php wp_nonce_field('masjidfeed_rotate_gateway_topic'); ?>
+                <p><?php submit_button(__('Rotate topic keys', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
+                <p class="description" style="max-width:900px;"><?php esc_html_e('Rotating makes the push service issue a new topic for this site and stop delivering to the old one after a grace window. Use this when a topic may have leaked: devices re-register automatically the next time they register for push notifications.', 'masjidfeed-app'); ?></p>
+            </form>
+        <?php endif; ?>
+
+        <form method="post" action="options.php" enctype="multipart/form-data">
+            <?php settings_fields(self::PUSH_OPTION_GROUP); ?>
+            <input type="hidden" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[_tab]" value="push" />
+
             <details id="masjidfeed_fcm_setup" style="max-width:900px;margin:16px 0;"<?php echo $fcm_section_open ? ' open' : ''; ?>>
                 <summary><strong><?php esc_html_e('Custom Firebase (FCM) setup', 'masjidfeed-app'); ?></strong></summary>
                 <div style="padding:8px 0 0 20px;">
@@ -867,44 +921,254 @@ class Masjid_Feed_Settings {
 
             <?php submit_button(); ?>
         </form>
-
-        <p class="description" style="max-width:900px;"><?php esc_html_e('The MasjidFeed push service delivers notifications through the hosted MasjidFeed gateway, which holds the Firebase credentials for the MasjidApp apps. Registering verifies this site\'s domain and stores the issued secret in the settings; no Firebase project of your own is required.', 'masjidfeed-app'); ?></p>
-        <?php $pending = self::is_gateway_pending(); ?>
-        <table class="form-table" role="presentation">
-            <tr>
-                <th scope="row"><?php esc_html_e('Registration', 'masjidfeed-app'); ?></th>
-                <td>
-                    <?php if (self::is_gateway_registered()) : ?>
-                        <p><strong><?php esc_html_e('Registered.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html(self::gateway_site_id()); ?></code></p>
-                    <?php elseif ($pending) : ?>
-                        <p><strong><?php esc_html_e('Pending.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Site ID:', 'masjidfeed-app'); ?> <code><?php echo esc_html(self::gateway_site_id()); ?></code></p>
-                    <?php else : ?>
-                        <p><strong><?php esc_html_e('Not registered.', 'masjidfeed-app'); ?></strong></p>
-                    <?php endif; ?>
-                </td>
-            </tr>
-        </table>
-        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-            <input type="hidden" name="action" value="masjidfeed_register_gateway" />
-            <?php wp_nonce_field('masjidfeed_register_gateway'); ?>
-            <p><?php submit_button($pending ? __('Validate', 'masjidfeed-app') : __('Register with MasjidFeed', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
-            <p class="description" style="max-width:900px;"><?php
-                if ($pending) {
-                    esc_html_e('Registration is pending: the push service could not verify this site\'s domain when it registered. Make sure the WordPress REST API is publicly reachable, then press Validate to retry — the push service re-fetches the challenge from the gateway-verification endpoint using this registration\'s fetch token (POST /v1/sites/{site_id}/verify). The pending registration expires 24 hours after it was created.', 'masjidfeed-app');
-                } else {
-                    esc_html_e('Registration publishes a one-time challenge at the gateway-verification REST endpoint, served only to the push service when it presents this registration’s fetch token; the service fetches it to verify this domain and issues the secret stored in the settings. If the service cannot reach this site, registration stays pending and pressing the button again retries verification.', 'masjidfeed-app');
-                }
-            ?></p>
-        </form>
-        <?php if (self::is_gateway_registered()) : ?>
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                <input type="hidden" name="action" value="masjidfeed_rotate_gateway_topic" />
-                <?php wp_nonce_field('masjidfeed_rotate_gateway_topic'); ?>
-                <p><?php submit_button(__('Rotate topic keys', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
-                <p class="description" style="max-width:900px;"><?php esc_html_e('Rotating makes the push service issue a new topic for this site and stop delivering to the old one after a grace window. Use this when a topic may have leaked: devices re-register automatically the next time they register for push notifications.', 'masjidfeed-app'); ?></p>
-            </form>
-        <?php endif; ?>
         <?php
+    }
+
+    /**
+     * Preview tab: an iPhone frame simulating the app's announcements
+     * screen, rendered server-side with the same /config and /announcements
+     * payloads the app fetches. Prayer times are fake; everything else
+     * mirrors the site's stored configuration.
+     */
+    private function render_preview_tab() {
+        $fake_times = array(
+            array('Fajr', '6:30', '5:36'),
+            array('Sunrise', '7:04', ''),
+            array('Dhuhr', '12:30', '11:53'),
+            array('Asr', '3:00', '2:17'),
+            array('Maghrib', '4:51', '4:41'),
+            array('Isha', '7:45', '6:08'),
+        );
+        // The simulator renders the same /config and /announcements payloads
+        // the app fetches, but server-side: admin-ajax.php reloads the full
+        // plugin stack, so the AJAX roundtrip made the tab switch take seconds.
+        $api = new Masjid_Feed_REST_API();
+        $config_response = $api->get_config(new WP_REST_Request('GET', '/masjid/v1/config'));
+        $config = is_wp_error($config_response) ? array() : $config_response->get_data();
+        $announcements_request = new WP_REST_Request('GET', '/masjid/v1/announcements');
+        $announcements_request->set_param('limit', 5);
+        $announcements_response = $api->get_announcements($announcements_request);
+        $announcements = is_wp_error($announcements_response) ? array() : $announcements_response->get_data();
+        if (!is_array($announcements)) {
+            $announcements = array();
+        }
+        // The simulator renders plain text: strip the rendered HTML the API
+        // returns for titles and descriptions before it reaches the browser.
+        $announcements = array_map(static function ($post) {
+            if (!is_array($post)) {
+                return $post;
+            }
+            $post['title'] = wp_strip_all_tags((string) ($post['title'] ?? ''));
+            $post['excerpt'] = wp_html_excerpt(
+                trim((string) preg_replace('/\s+/', ' ', wp_strip_all_tags((string) ($post['description'] ?? '')))),
+                180,
+                '…'
+            );
+            return $post;
+        }, $announcements);
+        $branding = is_array($config['branding'] ?? null) ? $config['branding'] : array();
+        $masjid = is_array($config['masjid'] ?? null) ? $config['masjid'] : array();
+        $primary_color = $branding['primaryColor'] ?? '#1B7F5C';
+        $logo_url = $branding['logoUrl'] ?? '';
+        $masjid_name = $masjid['name'] ?? '';
+        $ramadan_visible = !empty($config['featureFlags']['ramadan']) && !empty($config['ramadanUrl']);
+        ?>
+        <h2 id="masjidfeed-preview-heading"><?php esc_html_e('Preview', 'masjidfeed-app'); ?></h2>
+        <p class="description" style="max-width:900px;"><?php esc_html_e('Simulates how the mobile app renders this site. The name, logo, colors, announcements, and the Ramadan page mirror the site\'s stored configuration — switch to this tab after changing settings. Prayer times are placeholders.', 'masjidfeed-app'); ?></p>
+        <style>
+            .masjidfeed-preview { --masjidfeed-primary: #1B7F5C; display: flex; justify-content: center; padding: 24px 0 8px; }
+            .masjidfeed-preview__phone { width: 396px; max-width: 100%; background: #0b0b0c; border-radius: 58px; padding: 10px; box-shadow: 0 24px 60px rgba(0,0,0,.25); }
+            .masjidfeed-preview__screen { position: relative; height: min(792px, 82vh); min-height: 480px; border-radius: 48px; overflow: hidden; background: #F4F4F6; display: flex; flex-direction: column; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; color: #111; }
+            .masjidfeed-preview__island { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); width: 116px; height: 30px; background: #0b0b0c; border-radius: 16px; z-index: 30; }
+            .masjidfeed-preview__statusbar { display: flex; align-items: center; justify-content: space-between; padding: 16px 30px 4px; font-size: 16px; font-weight: 700; }
+            .masjidfeed-preview__status-left, .masjidfeed-preview__status-right { display: inline-flex; align-items: center; gap: 5px; }
+            .masjidfeed-preview__appbar { display: flex; align-items: center; gap: 12px; padding: 10px 18px; }
+            .masjidfeed-preview__logo { flex: 0 0 auto; width: 46px; height: 46px; border-radius: 10px; background: #e6e6ea; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; color: #77777d; overflow: hidden; }
+            .masjidfeed-preview__logo img { width: 100%; height: 100%; object-fit: contain; }
+            .masjidfeed-preview__name { flex: 1; min-width: 0; font-size: 24px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .masjidfeed-preview__appbar-icons { display: inline-flex; align-items: center; gap: 18px; }
+            .masjidfeed-preview__appbar-icons svg { width: 25px; height: 25px; }
+            .masjidfeed-preview__tabs { display: flex; gap: 26px; padding: 2px 18px 0; border-bottom: 1px solid #dcdce0; }
+            .masjidfeed-preview__tab { padding: 8px 2px 12px; font-size: 18px; color: #8b8b90; text-decoration: none; border-bottom: 3px solid transparent; }
+            .masjidfeed-preview__tab.is-active { color: #111; font-weight: 700; border-bottom-color: var(--masjidfeed-primary); }
+            .masjidfeed-preview__content { flex: 1; overflow-y: auto; padding: 16px 14px 130px; }
+            .masjidfeed-preview__card { background: #fff; border-radius: 18px; margin-bottom: 16px; overflow: hidden; }
+            .masjidfeed-preview__prayer { background: var(--masjidfeed-primary); color: #fff; padding: 16px 14px 8px; }
+            .masjidfeed-preview__next-prayer { display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(255,255,255,.16); color: #fff; border-radius: 14px; padding: 13px 12px; font-size: 18px; font-weight: 700; }
+            .masjidfeed-preview__next-prayer svg { width: 22px; height: 22px; flex: 0 0 auto; }
+            .masjidfeed-preview__times { display: flex; justify-content: space-between; padding: 14px 4px 6px; text-align: center; }
+            .masjidfeed-preview__time-name { font-size: 14px; }
+            .masjidfeed-preview__time-value { font-size: 17px; font-weight: 700; margin-top: 3px; }
+            .masjidfeed-preview__time-secondary { font-size: 14px; color: rgba(255,255,255,.75); margin-top: 3px; min-height: 17px; }
+            .masjidfeed-preview__section-title { margin: 4px 4px 12px; font-size: 21px; font-weight: 800; }
+            .masjidfeed-preview__announcement { padding: 20px 18px 16px; }
+            .masjidfeed-preview__announcement-title { margin: 0 0 4px; font-family: Georgia, 'Times New Roman', serif; font-weight: 500; font-size: 26px; line-height: 1.2; }
+            .masjidfeed-preview__announcement-date { color: #8b8b90; font-size: 16px; margin-bottom: 12px; }
+            .masjidfeed-preview__announcement-image { width: 100%; display: block; border-radius: 4px; margin-bottom: 12px; }
+            .masjidfeed-preview__announcement-excerpt { margin: 0; font-size: 16px; line-height: 1.45; color: #333; }
+            .masjidfeed-preview__empty { padding: 20px; color: #666; }
+
+            .masjidfeed-preview__bottombar { position: absolute; left: 14px; right: 14px; bottom: 12px; z-index: 20; display: flex; justify-content: space-around; align-items: center; padding: 9px 8px; background: rgba(252,252,252,.9); border: 1px solid #e3e3e7; border-radius: 999px; box-shadow: 0 10px 26px rgba(0,0,0,.14); }
+            .masjidfeed-preview__bottom-item { display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 12px; color: #4c4c50; }
+            .masjidfeed-preview__bottom-item svg { width: 23px; height: 23px; }
+            .masjidfeed-preview__bottom-item.is-active { color: var(--masjidfeed-primary); font-weight: 600; }
+        </style>
+        <div class="masjidfeed-preview" id="masjidfeed-preview-root" style="--masjidfeed-primary: <?php echo esc_attr($primary_color); ?>">
+            <div class="masjidfeed-preview__phone">
+                <div class="masjidfeed-preview__screen">
+                    <div class="masjidfeed-preview__island"></div>
+                    <div class="masjidfeed-preview__statusbar">
+                        <span class="masjidfeed-preview__status-left">
+                            <span id="masjidfeed-preview-clock">9:41</span>
+                            <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+                        </span>
+                        <span class="masjidfeed-preview__status-right">
+                            <svg width="18" height="12" viewBox="0 0 18 12" aria-hidden="true"><rect y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="4.5" width="3" height="7.5" rx="1" fill="currentColor"/><rect x="10" y="2" width="3" height="10" rx="1" fill="currentColor"/><rect x="15" width="3" height="12" rx="1" fill="currentColor" opacity=".35"/></svg>
+                            <svg width="17" height="12" viewBox="0 0 17 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M1.5 4.2a10.4 10.4 0 0 1 14 0"/><path d="M4.3 7a6.3 6.3 0 0 1 8.4 0"/><path d="M7.1 9.8a2.6 2.6 0 0 1 2.8 0"/></svg>
+                            <svg width="25" height="12" viewBox="0 0 25 12" aria-hidden="true"><rect x=".5" y=".5" width="21" height="11" rx="3.5" fill="none" stroke="currentColor" opacity=".4"/><rect x="2.5" y="2.5" width="15" height="7" rx="2" fill="currentColor"/><path d="M23.5 4v4" stroke="currentColor" stroke-width="2" opacity=".4" stroke-linecap="round"/></svg>
+                        </span>
+                    </div>
+                    <div class="masjidfeed-preview__appbar">
+                        <span class="masjidfeed-preview__logo" id="masjidfeed-preview-logo"><?php if ($logo_url) : ?><img src="<?php echo esc_url($logo_url); ?>" alt="" /><?php else : ?><?php echo esc_html(strtoupper(mb_substr(trim((string) $masjid_name), 0, 1)) ?: 'M'); ?><?php endif; ?></span>
+                        <span class="masjidfeed-preview__name" id="masjidfeed-preview-name"><?php echo esc_html($masjid_name); ?></span>
+                        <span class="masjidfeed-preview__appbar-icons">
+                            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                        </span>
+                    </div>
+                    <div class="masjidfeed-preview__tabs">
+                        <span class="masjidfeed-preview__tab is-active"><?php esc_html_e('Announcements', 'masjidfeed-app'); ?></span>
+                        <span class="masjidfeed-preview__tab" id="masjidfeed-preview-ramadan-tab"<?php echo $ramadan_visible ? '' : ' hidden'; ?>><?php esc_html_e('Ramadan', 'masjidfeed-app'); ?></span>
+                        <span class="masjidfeed-preview__tab"><?php esc_html_e('Events', 'masjidfeed-app'); ?></span>
+                        <span class="masjidfeed-preview__tab"><?php esc_html_e('About', 'masjidfeed-app'); ?></span>
+                    </div>
+                    <div class="masjidfeed-preview__content">
+                        <div class="masjidfeed-preview__card masjidfeed-preview__prayer">
+                            <div class="masjidfeed-preview__next-prayer">
+                                <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                <span id="masjidfeed-preview-countdown"></span>
+                            </div>
+                            <div class="masjidfeed-preview__times">
+                                <?php foreach ($fake_times as list($time_name, $time_value, $time_secondary)) : ?>
+                                    <div class="masjidfeed-preview__time-col">
+                                        <div class="masjidfeed-preview__time-name"><?php echo esc_html($time_name); ?></div>
+                                        <div class="masjidfeed-preview__time-value"><?php echo esc_html($time_value); ?></div>
+                                        <div class="masjidfeed-preview__time-secondary"><?php echo esc_html($time_secondary); ?></div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                        <h3 class="masjidfeed-preview__section-title"><?php esc_html_e('Latest Announcements', 'masjidfeed-app'); ?></h3>
+                        <div id="masjidfeed-preview-announcements">
+                            <?php if (!$announcements) : ?>
+                                <div class="masjidfeed-preview__card masjidfeed-preview__empty"><?php esc_html_e('No announcements yet.', 'masjidfeed-app'); ?></div>
+                            <?php else : ?>
+                                <?php foreach ($announcements as $post) : ?>
+                                    <div class="masjidfeed-preview__card masjidfeed-preview__announcement">
+                                        <h4 class="masjidfeed-preview__announcement-title"><?php echo esc_html($post['title'] ?? ''); ?></h4>
+                                        <div class="masjidfeed-preview__announcement-date"><?php echo esc_html($this->format_preview_date($post['publishedAt'] ?? '')); ?></div>
+                                        <?php if (!empty($post['image'])) : ?>
+                                            <img class="masjidfeed-preview__announcement-image" src="<?php echo esc_url($post['image']); ?>" alt="" loading="lazy" />
+                                        <?php endif; ?>
+                                        <?php if (!empty($post['excerpt'])) : ?>
+                                            <p class="masjidfeed-preview__announcement-excerpt"><?php echo esc_html($post['excerpt']); ?></p>
+                                        <?php endif; ?>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <div class="masjidfeed-preview__bottombar">
+                        <span class="masjidfeed-preview__bottom-item is-active">
+                            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                            <?php esc_html_e('Home', 'masjidfeed-app'); ?>
+                        </span>
+                        <span class="masjidfeed-preview__bottom-item">
+                            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                            <?php esc_html_e('Donate', 'masjidfeed-app'); ?>
+                        </span>
+                        <span class="masjidfeed-preview__bottom-item">
+                            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M12 7l3 5-3 5-3-5z"/></svg>
+                            <?php esc_html_e('Prayer', 'masjidfeed-app'); ?>
+                        </span>
+                        <span class="masjidfeed-preview__bottom-item">
+                            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+                            <?php esc_html_e('Qibla', 'masjidfeed-app'); ?>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php
+    }
+
+    /**
+     * Inline script for the Preview tab. Ships the fake prayer schedule
+     * for the live countdown; the config and announcements are rendered
+     * server-side in render_preview_tab(). Exits early when the Preview
+     * tab is not on screen.
+     */
+    private function preview_js() {
+        $data = array(
+            'schedule' => array(
+                array('name' => 'Fajr', 'minutes' => 6 * 60 + 30, 'athan' => true),
+                array('name' => 'Sunrise', 'minutes' => 7 * 60 + 4, 'athan' => false),
+                array('name' => 'Dhuhr', 'minutes' => 12 * 60 + 30, 'athan' => true),
+                array('name' => 'Asr', 'minutes' => 15 * 60, 'athan' => true),
+                array('name' => 'Maghrib', 'minutes' => 16 * 60 + 51, 'athan' => true),
+                array('name' => 'Isha', 'minutes' => 19 * 60 + 45, 'athan' => true),
+            ),
+        );
+        $json = wp_json_encode($data, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+        // The script is attached to the jquery handle, which loads in the
+        // head, so the root element may not exist yet: defer to DOM ready.
+        return "(function () {\n"
+            . "var data = {$json};\n"
+            . "var bootstrap = function () {\n"
+            . "if (!document.getElementById('masjidfeed-preview-root')) { return; }\n"
+            . "function tickClock() {\n"
+            . "    var now = new Date();\n"
+            . "    var hours = now.getHours() % 12 || 12;\n"
+            . "    document.getElementById('masjidfeed-preview-clock').textContent = hours + ':' + String(now.getMinutes()).padStart(2, '0');\n"
+            . "}\n"
+            . "function tickCountdown() {\n"
+            . "    var now = new Date();\n"
+            . "    var minutes = now.getHours() * 60 + now.getMinutes();\n"
+            . "    var next = null;\n"
+            . "    var diff = 0;\n"
+            . "    for (var i = 0; i < data.schedule.length; i++) {\n"
+            . "        if (data.schedule[i].minutes > minutes) {\n"
+            . "            next = data.schedule[i];\n"
+            . "            diff = next.minutes - minutes;\n"
+            . "            break;\n"
+            . "        }\n"
+            . "    }\n"
+            . "    if (!next) {\n"
+            . "        next = data.schedule[0];\n"
+            . "        diff = 24 * 60 - minutes + next.minutes;\n"
+            . "    }\n"
+            . "    var text = Math.floor(diff / 60) + ' hr ' + (diff % 60) + ' min till ' + next.name + (next.athan ? ' Athan' : '');\n"
+            . "    document.getElementById('masjidfeed-preview-countdown').textContent = text;\n"
+            . "}\n"
+            . "tickClock();\n"
+            . "tickCountdown();\n"
+            . "setInterval(tickClock, 15000);\n"
+            . "setInterval(tickCountdown, 30000);\n"
+            . "};\n"
+            . "if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', bootstrap); } else { bootstrap(); }\n"
+            . "})();";
+    }
+
+    /**
+     * Format an ISO timestamp from the announcements payload for the
+     * simulator's date line, e.g. "Sep 2, 2026".
+     */
+    private function format_preview_date($iso) {
+        $timestamp = strtotime((string) $iso);
+        if (false === $timestamp) {
+            return '';
+        }
+        return wp_date('M j, Y', $timestamp);
     }
 
     /**

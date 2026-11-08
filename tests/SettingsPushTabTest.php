@@ -151,6 +151,24 @@ class SettingsPushTabTest extends TestCase {
         $this->assertStringContainsString('masjidfeed_register_gateway', $html);
     }
 
+    public function test_push_tab_places_registration_between_delivery_and_fcm_setup(): void {
+        $html = $this->render_push_tab();
+
+        // Delivery fields come first, then the hosted-service registration
+        // block, then the Custom Firebase (FCM) setup section.
+        $delivery_at = strpos($html, 'masjidfeed_push_deep_link_template');
+        $registration_at = strpos($html, 'masjidfeed_register_gateway');
+        $fcm_at = strpos($html, 'masjidfeed_fcm_setup');
+        $this->assertNotFalse($delivery_at);
+        $this->assertNotFalse($registration_at);
+        $this->assertNotFalse($fcm_at);
+        $this->assertLessThan($registration_at, $delivery_at);
+        $this->assertLessThan($fcm_at, $registration_at);
+        // The FCM uploads stay inside their own settings form: the tab saves
+        // through two settings forms (delivery, then FCM setup).
+        $this->assertSame(2, substr_count($html, 'action="options.php"'));
+    }
+
     private function mode_option(string $html, string $mode): string {
         if (preg_match('/<option value="' . $mode . '"[^>]*>/', $html, $matches)) {
             return $matches[0];
@@ -249,6 +267,37 @@ class SettingsPushTabTest extends TestCase {
         $this->assertArrayNotHasKey('gateway_secret', $out);
         $this->assertSame(['site_id' => 'site-1', 'secret' => 'secret-1'], $GLOBALS['__test_options'][MASJIDFEED_GATEWAY_OPTION_KEY]);
         $this->assertTrue(Masjid_Feed_Settings::is_gateway_registered());
+    }
+
+    public function test_fcm_form_save_preserves_delivery_settings(): void {
+        // The FCM setup form submits no delivery fields: the stored mode and
+        // deep-link template must survive its save.
+        $this->store_settings(['push_mode' => 'both', 'push_deep_link_template' => 'masjidapp://open/{postId}']);
+
+        $out = $this->sanitize([]);
+
+        $this->assertSame('both', $out['push_mode']);
+        $this->assertSame('masjidapp://open/{postId}', $out['push_deep_link_template']);
+    }
+
+    public function test_delivery_form_save_preserves_firebase_configuration(): void {
+        // The delivery form submits no Firebase uploads: the stored
+        // configuration must survive its save.
+        $GLOBALS['__test_options'][MASJIDFEED_CREDENTIAL_OPTION_KEY] = 'stored-credentials';
+        $this->store_settings([
+            'push_mode' => 'fcm',
+            'firebase_project_id' => 'proj',
+            'firebase_ios_config' => ['appId' => 'ios'],
+            'firebase_android_config' => ['appId' => 'android'],
+        ]);
+
+        $out = $this->sanitize(['push_mode' => 'fcm', 'push_deep_link_template' => '']);
+
+        $this->assertSame('fcm', $out['push_mode']);
+        $this->assertSame('', $out['push_deep_link_template']);
+        $this->assertSame('proj', $out['firebase_project_id']);
+        $this->assertSame(['appId' => 'ios'], $out['firebase_ios_config']);
+        $this->assertSame(['appId' => 'android'], $out['firebase_android_config']);
     }
 
     private function register_with_gateway(): array {
