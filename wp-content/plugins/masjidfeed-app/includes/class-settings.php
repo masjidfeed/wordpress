@@ -301,6 +301,13 @@ class Masjid_Feed_Settings {
         wp_enqueue_media();
         wp_enqueue_style('wp-color-picker');
         wp_enqueue_script('wp-color-picker');
+        wp_enqueue_style(
+            'masjidfeed-app-overview',
+            'https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&display=swap',
+            array(),
+            null
+        );
+        wp_add_inline_style('masjidfeed-app-overview', $this->app_overview_css());
         wp_add_inline_script('media-editor', $this->media_picker_js());
         wp_add_inline_script('media-editor', $this->events_source_js());
         wp_add_inline_script('media-editor', $this->push_mode_js());
@@ -338,6 +345,55 @@ class Masjid_Feed_Settings {
         return "jQuery(function(\$) {\n"
             . "    \$('.masjidapp-color-picker').wpColorPicker();\n"
             . "});";
+    }
+
+    /**
+     * Styles for the app overview banner on the General tab, mirroring the
+     * project hero at goodsoftware.foundation/p/masjidfeed.
+     */
+    private function app_overview_css() {
+        return <<<'CSS'
+.masjidfeed-app-overview{display:flex;flex-wrap:wrap;align-items:center;gap:32px 48px;background:#f7f2ed;border:1px solid #ece3da;border-radius:18px;padding:40px 44px;margin:12px 0 28px;}
+.masjidfeed-app-overview__content{flex:1 1 420px;min-width:280px;}
+.masjidfeed-app-overview__title{margin:0 0 16px;font-family:'Fraunces',Georgia,'Times New Roman',serif;font-weight:600;font-size:46px;line-height:1.05;color:#2b2119;}
+.masjidfeed-app-overview__lede{margin:0;max-width:56ch;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:18px;line-height:1.65;color:#5c554f;}
+.masjidfeed-app-overview__actions{display:flex;flex-wrap:wrap;gap:14px;margin-top:28px;}
+.masjidfeed-app-overview__store-button{display:inline-flex;align-items:center;gap:11px;background:#231c1c;color:#fff;padding:14px 28px;border-radius:999px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;font-weight:600;line-height:1;text-decoration:none;}
+.masjidfeed-app-overview__store-button:hover,.masjidfeed-app-overview__store-button:focus{background:#3a3131;color:#fff;}
+.masjidfeed-app-overview__store-button svg{width:20px;height:20px;fill:currentColor;flex:none;}
+.masjidfeed-app-overview__icon{flex:none;background:#fff;border-radius:30px;padding:10px;box-shadow:0 14px 40px rgba(43,33,25,.14);}
+.masjidfeed-app-overview__icon img{display:block;width:220px;height:220px;border-radius:22px;}
+@media (max-width:960px){.masjidfeed-app-overview{padding:28px;}.masjidfeed-app-overview__title{font-size:36px;}.masjidfeed-app-overview__icon img{width:160px;height:160px;}}
+CSS;
+    }
+
+    /**
+     * App overview banner shown at the top of the General tab: project
+     * title, description and store links, matching the project hero page.
+     */
+    private function render_app_overview() {
+        $icon_url = MASJIDFEED_PLUGIN_URL . 'assets/masjidfeed-app-icon.png';
+        ?>
+        <div class="masjidfeed-app-overview">
+            <div class="masjidfeed-app-overview__content">
+                <h2 class="masjidfeed-app-overview__title"><?php esc_html_e('MasjidFeed', 'masjidfeed-app'); ?></h2>
+                <p class="masjidfeed-app-overview__lede"><?php esc_html_e('A native mobile frontend for existing mosque websites, made to keep a congregation close to the prayer hall and to one another.', 'masjidfeed-app'); ?></p>
+                <div class="masjidfeed-app-overview__actions">
+                    <a class="masjidfeed-app-overview__store-button" href="https://play.google.com/store/apps/details?id=com.goodsoftware.masjidapp" rel="noopener">
+                        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M22.018 13.298l-3.919 2.218-3.515-3.493 3.543-3.521 3.891 2.202a1.49 1.49 0 0 1 0 2.594zM1.337.924a1.486 1.486 0 0 0-.112.568v21.017c0 .217.045.419.124.6l11.155-11.087L1.337.924zm12.207 10.065l3.258-3.238L3.45.195a1.466 1.466 0 0 0-.946-.179l11.04 10.973zm0 2.067l-11 10.933c.298.036.612-.016.906-.183l13.324-7.54-3.23-3.21z"/></svg>
+                        <?php esc_html_e('Get it on Google Play', 'masjidfeed-app'); ?>
+                    </a>
+                    <a class="masjidfeed-app-overview__store-button" href="https://apps.apple.com/us/app/masjidfeed/id6794994746" rel="noopener">
+                        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M8.8086 14.9194l6.1107-11.0368c.0837-.1513.1682-.302.2437-.4584.0685-.142.1267-.2854.1646-.4403.0803-.3259.0588-.6656-.066-.9767-.1238-.3095-.3417-.5678-.6201-.7355a1.4175 1.4175 0 0 0-.921-.1924c-.3207.043-.6135.1935-.8443.4288-.1094.1118-.1996.2361-.2832.369-.092.1463-.175.2979-.259.4492l-.3864.6979-.3865-.6979c-.0837-.1515-.1667-.303-.2587-.4492-.0837-.1329-.1739-.2572-.2835-.369-.2305-.2353-.5233-.3857-.844-.429a1.4181 1.4181 0 0 0-.921.1926c-.2784.1677-.4964.426-.6203.7355-.1246.311-.1461.6508-.066.9767.038.155.0962.2984.1648.4403.0753.1564.1598.307.2437.4584l1.248 2.2543-4.8625 8.7825H2.0295c-.1676 0-.3351-.0007-.5026.0092-.1522.009-.3004.0284-.448.0714-.3108.0906-.5822.2798-.7783.548-.195.2665-.3006.5929-.3006.9279 0 .3352.1057.6612.3006.9277.196.2683.4675.4575.7782.548.1477.043.296.0623.4481.0715.1675.01.335.009.5026.009h13.0974c.0171-.0357.059-.1294.1-.2697.415-1.4151-.6156-2.843-2.0347-2.843zM3.113 18.5418l-.7922 1.5008c-.0818.1553-.1644.31-.2384.4705-.067.1458-.124.293-.1611.452-.0785.3346-.0576.6834.0645 1.0029.1212.3175.3346.583.607.7549.2727.172.5891.2416.9013.1975.3139-.044.6005-.1986.8263-.4402.1072-.1148.1954-.2424.2772-.3787.0902-.1503.1714-.3059.2535-.4612L6 19.4636c-.0896-.149-.9473-1.4704-2.887-.9218m20.5861-3.0056a1.4707 1.4707 0 0 0-.779-.5407c-.1476-.0425-.2961-.0616-.4483-.0705-.1678-.0099-.3352-.0091-.503-.0091H18.648l-4.3891-7.817c-.6655.7005-.9632 1.485-1.0773 2.1976-.1655 1.0333.0367 2.0934.546 3.0004l5.2741 9.3933c.084.1494.167.299.2591.4435.0837.131.1739.2537.2836.364.231.2323.5238.3809.8449.4232.3192.0424.643-.0244.9217-.1899.2784-.1653.4968-.4204.621-.7257.1246-.3072.146-.6425.0658-.9641-.0381-.1529-.0962-.2945-.165-.4346-.0753-.1543-.1598-.303-.2438-.4524l-1.216-2.1662h1.596c.1677 0 .3351.0009.5029-.009.1522-.009.3007-.028.4483-.0705a1.4707 1.4707 0 0 0 .779-.5407A1.5386 1.5386 0 0 0 24 16.452a1.539 1.539 0 0 0-.3009-.9158Z"/></svg>
+                        <?php esc_html_e('Download on the App Store', 'masjidfeed-app'); ?>
+                    </a>
+                </div>
+            </div>
+            <div class="masjidfeed-app-overview__icon">
+                <img src="<?php echo esc_url($icon_url); ?>" alt="<?php esc_attr_e('MasjidFeed app icon', 'masjidfeed-app'); ?>" width="220" height="220" />
+            </div>
+        </div>
+        <?php
     }
 
     private function media_picker_js() {
@@ -537,6 +593,7 @@ class Masjid_Feed_Settings {
         $choices = Masjid_Feed_Event_Sources::get_choices();
         $events_source = self::resolve_events_source($opts);
         $is_tec_selected = Masjid_Feed_Event_Source_The_Events_Calendar::KEY === $events_source;
+        $this->render_app_overview();
         ?>
         <form method="post" action="options.php">
             <?php settings_fields(self::GENERAL_OPTION_GROUP); ?>

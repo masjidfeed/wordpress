@@ -727,6 +727,9 @@ if (!function_exists('get_tags')) {
 
 $plugin_dir = dirname(__DIR__) . '/wp-content/plugins/masjidfeed-app';
 
+define('MASJIDFEED_PLUGIN_DIR', $plugin_dir . '/');
+define('MASJIDFEED_PLUGIN_URL', 'https://example.test/wp-content/plugins/masjidfeed-app/');
+
 require_once $plugin_dir . '/vendor-prefixed/autoload.php';
 require_once $plugin_dir . '/includes/class-firebase-exceptions.php';
 require_once $plugin_dir . '/includes/class-firebase-client.php';
