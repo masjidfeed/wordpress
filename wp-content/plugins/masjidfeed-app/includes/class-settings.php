@@ -1369,7 +1369,11 @@ CSS;
 
     public static function get_public_firebase_config() {
         $opts = self::get_all_options();
-        $public_keys = array_flip(array('appId', 'senderId', 'apiKey'));
+        // projectId is public Firebase configuration (it appears in every
+        // GoogleService-Info.plist / google-services.json shipped with the app)
+        // and is required by the Firebase iOS/Android SDKs to initialize
+        // Installations (and therefore FCM and App Check).
+        $public_keys = array_flip(array('appId', 'senderId', 'projectId', 'apiKey'));
         return array(
             'ios' => array_intersect_key($opts['firebase_ios_config'], $public_keys),
             'android' => array_intersect_key($opts['firebase_android_config'], $public_keys),
