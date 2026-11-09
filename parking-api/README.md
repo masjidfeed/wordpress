@@ -1,15 +1,13 @@
 # Parking API
 
 Data and verification steps for `GET /wp-json/masjid/v1/parking-config`, which
-serves the ICOB app's parking map. The endpoint's payload is the master copy:
+serves the masjid parking map. The endpoint's payload is the master copy:
 every change starts by downloading what is live.
 
 ## Files
 
-- `parking-config.json` — the day-one payload (the app's built-in data). Paste
-  this into Settings → MasjidFeed App → Parking to start serving.
-- `zones.geojson` — the same 14 zones as GeoJSON, for a first look in
-  geojson.io.
+- `sample.geojson` — sample GeoJSON
+- `sample.json` — sample parking configuration based on above GeoJSON
 - `parking-geojson-to-config.py` — converts between the two formats and checks
   the result. Needs Python 3.8 or later, nothing else installed.
 
@@ -17,7 +15,7 @@ every change starts by downloading what is live.
 
 1. Download what is live:
 
-   `curl -s -A 'ICOB-admin/1.0' https://bothellmosque.org/wp-json/masjid/v1/parking-config > current.json`
+   `curl -s -A 'admin/1.0' https://<site.url>/wp-json/masjid/v1/parking-config > current.json`
 
 2. Turn it into GeoJSON: `python3 parking-geojson-to-config.py --to-geojson current.json > zones.geojson`
 3. Edit `zones.geojson` in geojson.io (zones) or `events` in `current.json` (schedules).
@@ -29,7 +27,7 @@ every change starts by downloading what is live.
 
 ## Done when (deployment checklist)
 
-- `curl -s -A 'ICOB-admin/1.0' https://bothellmosque.org/wp-json/masjid/v1/parking-config > live.json`
+- `curl -s -A 'admin/1.0' https://<site.url>/wp-json/masjid/v1/parking-config > live.json`
   returns `200` and the saved payload.
 - Round-tripping the download prints `OK` twice:
   `python3 parking-geojson-to-config.py --to-geojson live.json > live.geojson`
