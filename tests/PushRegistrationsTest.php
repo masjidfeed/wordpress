@@ -208,6 +208,115 @@ class PushRegistrationsTest extends TestCase {
         $this->assertSame('Firebase mobile application configuration is incomplete.', $response->get_error_message());
     }
 
+    public function test_fcm_mode_client_registration_returns_the_site_topic_key(): void {
+        $this->store_settings(['push_mode' => 'fcm', 'push_enabled' => 1]);
+        $api = $this->api_with_local_firebase();
+        $request = $this->rest_request('POST');
+        $request->set_param('registrationMode', 'client');
+
+        $response = $api->register_push_token($request);
+
+        $data = $response->get_data();
+        // Client-side registration registers nothing server-side; the app
+        // subscribes itself to the site's canonical topic.
+        $this->assertFalse($data['registered']);
+        $this->assertSame('masjid-x', $data['topicKey']['site_id']);
+        $this->assertSame('masjid_masjid-x', $data['topicKey']['topic']);
+        $this->assertMatchesRegularExpression('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/', $data['topicKey']['expires_at']);
+        // Default validity window: 30 days from issuance.
+        $this->assertEqualsWithDelta(time() + 30 * DAY_IN_SECONDS, strtotime($data['topicKey']['expires_at']), 60);
+        $this->assertArrayNotHasKey('result', $data);
+    }
+
+    public function test_fcm_mode_client_registration_needs_no_token(): void {
+        $this->store_settings(['push_mode' => 'fcm', 'push_enabled' => 1]);
+        $api = $this->api_with_local_firebase();
+        // No token param at all: client-side registration only needs the
+        // canonical topic.
+        $request = $this->rest_request('POST');
+        $request->set_param('registrationMode', 'client');
+
+        $response = $api->register_push_token($request);
+
+        $this->assertInstanceOf(WP_REST_Response::class, $response);
+        $data = $response->get_data();
+        $this->assertFalse($data['registered']);
+        $this->assertSame('masjid_masjid-x', $data['topicKey']['topic']);
+    }
+
+    public function test_fcm_mode_client_registration_ignores_the_token(): void {
+        $this->store_settings(['push_mode' => 'fcm', 'push_enabled' => 1]);
+        $fcm = new class extends Masjid_Feed_Firebase {
+            public function __construct() {
+            }
+
+            public function topic() {
+                return 'masjid_masjid-x';
+            }
+
+            public function subscribe($token) {
+                throw new RuntimeException('server-side subscribe must not run in client mode');
+            }
+        };
+        $api = new Masjid_Feed_REST_API();
+        $property = new ReflectionProperty(Masjid_Feed_REST_API::class, 'authorized_firebase');
+        $property->setValue($api, $fcm);
+        $request = $this->rest_request('POST');
+        $request->set_param('registrationMode', 'client');
+        $request->set_param('token', 'current-fcm-token-1234567890');
+
+        $response = $api->register_push_token($request);
+
+        $data = $response->get_data();
+        $this->assertFalse($data['registered']);
+        $this->assertSame('masjid_masjid-x', $data['topicKey']['topic']);
+        $this->assertArrayNotHasKey('result', $data);
+    }
+
+    public function test_fcm_mode_server_registration_subscribes_the_token(): void {
+        $this->store_settings(['push_mode' => 'fcm', 'push_enabled' => 1]);
+        $fcm = new class extends Masjid_Feed_Firebase {
+            public function __construct() {
+            }
+
+            public function subscribe($token) {
+                return array('errors' => array());
+            }
+        };
+        $api = new Masjid_Feed_REST_API();
+        $property = new ReflectionProperty(Masjid_Feed_REST_API::class, 'authorized_firebase');
+        $property->setValue($api, $fcm);
+        $request = $this->rest_request('POST');
+        $request->set_param('token', 'current-fcm-token-1234567890');
+
+        $response = $api->register_push_token($request);
+
+        $data = $response->get_data();
+        $this->assertTrue($data['registered']);
+        $this->assertArrayNotHasKey('topicKey', $data);
+        $this->assertSame(array('successful' => true, 'errorCount' => 0), $data['result']);
+    }
+
+    /**
+     * REST API whose local Firebase half exposes the canonical topic without
+     * touching credentials (the handler never constructs it itself in FCM
+     * mode; authorization normally builds it).
+     */
+    private function api_with_local_firebase(): Masjid_Feed_REST_API {
+        $fcm = new class extends Masjid_Feed_Firebase {
+            public function __construct() {
+            }
+
+            public function topic() {
+                return 'masjid_masjid-x';
+            }
+        };
+        $api = new Masjid_Feed_REST_API();
+        $property = new ReflectionProperty(Masjid_Feed_REST_API::class, 'authorized_firebase');
+        $property->setValue($api, $fcm);
+        return $api;
+    }
+
     public function test_both_mode_server_registration_merges_with_fcm_result(): void {
         $this->store_settings([
             'push_mode' => 'both',

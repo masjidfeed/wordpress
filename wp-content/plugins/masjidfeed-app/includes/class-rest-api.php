@@ -21,7 +21,7 @@ class Masjid_Feed_REST_API {
     const MAX_LIMIT = 100;
     const CLIENT_CACHE_TTL = 60;
     const SERVER_CACHE_TTL = DAY_IN_SECONDS;
-    const CONFIG_CACHE_KEY = 'masjidfeed_config_response_v8';
+    const CONFIG_CACHE_KEY = 'masjidfeed_config_response_v9';
     const CONFIG_SHARED_CACHE_TTL = HOUR_IN_SECONDS;
     const EVENTS_CACHE_KEY = 'masjidfeed_events_response_v9';
     const EVENTS_SHARED_CACHE_TTL = 5 * MINUTE_IN_SECONDS;
@@ -32,6 +32,10 @@ class Masjid_Feed_REST_API {
     const POST_SHARED_CACHE_TTL = HOUR_IN_SECONDS;
     const PARKING_CACHE_KEY = 'masjidfeed_parking_config_response_v1';
     const PARKING_SHARED_CACHE_TTL = HOUR_IN_SECONDS;
+    // Validity window handed to client-mode registrants against the site's
+    // own Firebase project: the app re-registers before it elapses, matching
+    // the hosted-service topic-key cadence.
+    const TOPIC_KEY_TTL = 30 * DAY_IN_SECONDS;
 
     private $authorized_firebase;
     private $gateway_client;
@@ -194,7 +198,14 @@ class Masjid_Feed_REST_API {
         if (in_array($mode, array(Masjid_Feed_Settings::PUSH_MODE_FCM, Masjid_Feed_Settings::PUSH_MODE_BOTH), true)
             && $this->authorized_firebase instanceof Masjid_Feed_Firebase) {
             $attempts++;
-            if ('' === $token) {
+            if ('client' === $registration_mode && Masjid_Feed_Settings::PUSH_MODE_FCM === $mode) {
+                // Client-side registration against the site's own Firebase
+                // project: the app subscribes itself to the canonical topic,
+                // so no token is needed and nothing is registered
+                // server-side.
+                $response['registered'] = false;
+                $response['topicKey'] = $this->site_topic_key();
+            } elseif ('' === $token) {
                 // The site's own Firebase half always subscribes the token
                 // server-side.
                 $failures[] = new WP_Error('masjidfeed_fcm_token_required', __('An FCM token is required to register for push notifications.', 'masjidfeed-app'), array('status' => 400));
@@ -228,6 +239,21 @@ class Masjid_Feed_REST_API {
      */
     private function registration_mode($request) {
         return 'client' === strtolower(trim((string) $request->get_param('registrationMode'))) ? 'client' : 'server';
+    }
+
+    /**
+     * The topic key for client-side registration against the site's own
+     * Firebase project. Mirrors the hosted gateway's topic-key shape:
+     * `site_id` is the masjid ID, `topic` the canonical FCM topic, and
+     * `expires_at` a default 30-day validity telling the app when to
+     * re-register.
+     */
+    private function site_topic_key() {
+        return array(
+            'site_id' => (string) Masjid_Feed_Settings::get_option('masjid_id'),
+            'topic' => $this->authorized_firebase->topic(),
+            'expires_at' => gmdate('Y-m-d\TH:i:s\Z', time() + self::TOPIC_KEY_TTL),
+        );
     }
 
     public function unregister_push_token($request) {
@@ -338,7 +364,6 @@ class Masjid_Feed_REST_API {
                     && !empty($opts['firebase_ios_config'])
                     && !empty($opts['firebase_android_config']),
                 'registrationUrl' => rest_url(self::NAMESPACE_ . '/push/registrations'),
-                'firebase' => Masjid_Feed_Settings::get_public_firebase_config(),
             ),
         );
 
@@ -902,10 +927,11 @@ class Masjid_Feed_REST_API {
             ),
         );
         if ($include_previous_token) {
-            // Registration flavor for the hosted MasjidFeed gateway:
-            // "server" (default) registers the FCM token via the gateway,
-            // "client" returns the canonical topic for the app to subscribe
-            // to itself. Ignored by the DELETE route.
+            // Registration flavor: "server" (default) registers the FCM
+            // token server-side (via the gateway in hosted modes, the
+            // site's own Firebase project otherwise); "client" returns the
+            // canonical topic for the app to subscribe to itself. Ignored
+            // by the DELETE route.
             $args['registrationMode'] = array(
                 'required' => false,
                 'type' => 'string',

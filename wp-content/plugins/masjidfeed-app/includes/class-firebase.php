@@ -361,7 +361,12 @@ class Masjid_Feed_Firebase {
         return array('message' => $message);
     }
 
-    private function topic() {
+    /**
+     * This site's canonical FCM topic, derived from the masjid ID. Public so
+     * client-mode registration can hand the app the topic to subscribe to
+     * itself.
+     */
+    public function topic() {
         $masjid_id = Masjid_Feed_Settings::get_option('masjid_id');
         return substr('masjid_' . preg_replace('/[^A-Za-z0-9-_.~%]/', '_', (string) $masjid_id), 0, 900);
     }
