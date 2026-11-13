@@ -2127,10 +2127,13 @@ CSS;
             Masjid_Feed_Settings::PUSH_MODE_MASJIDFEED => __('MasjidFeed push', 'masjidfeed-app'),
             Masjid_Feed_Settings::PUSH_MODE_FCM => __('FCM (site\'s own Firebase project)', 'masjidfeed-app'),
         );
-        echo '<table class="widefat striped"><thead><tr><th>' . esc_html__('Created', 'masjidfeed-app') . '</th><th>' . esc_html__('Post', 'masjidfeed-app') . '</th><th>' . esc_html__('Trigger', 'masjidfeed-app') . '</th><th>' . esc_html__('Status', 'masjidfeed-app') . '</th><th>' . esc_html__('Attempts', 'masjidfeed-app') . '</th><th>' . esc_html__('Sent via', 'masjidfeed-app') . '</th><th>' . esc_html__('Result', 'masjidfeed-app') . '</th></tr></thead><tbody>';
+        echo '<table class="widefat striped"><thead><tr><th>' . esc_html__('Created', 'masjidfeed-app') . '</th><th>' . esc_html__('Post', 'masjidfeed-app') . '</th><th>' . esc_html__('Trigger', 'masjidfeed-app') . '</th><th>' . esc_html__('Triggered by', 'masjidfeed-app') . '</th><th>' . esc_html__('Status', 'masjidfeed-app') . '</th><th>' . esc_html__('Attempts', 'masjidfeed-app') . '</th><th>' . esc_html__('Sent via', 'masjidfeed-app') . '</th><th>' . esc_html__('Result', 'masjidfeed-app') . '</th></tr></thead><tbody>';
         foreach ($jobs as $job) {
             $channel = (string) ($job->channel ?? '');
-            echo '<tr><td>' . esc_html($job->created_at) . '</td><td><a href="' . esc_url(get_edit_post_link($job->post_id)) . '">#' . (int) $job->post_id . '</a></td><td>' . esc_html($job->trigger_type) . '</td><td>' . esc_html($job->status) . '</td><td>' . (int) $job->attempts . '</td><td>' . esc_html($channel_labels[$channel] ?? '—') . '</td><td>';
+            $user_id = (int) ($job->triggered_by ?? 0);
+            $user = $user_id ? get_userdata($user_id) : false;
+            $triggered_by = $user ? $user->display_name : ($user_id ? (string) $user_id : __('System', 'masjidfeed-app'));
+            echo '<tr><td>' . esc_html($job->created_at) . '</td><td><a href="' . esc_url(get_edit_post_link($job->post_id)) . '">#' . (int) $job->post_id . '</a></td><td>' . esc_html($job->trigger_type) . '</td><td>' . esc_html($triggered_by) . '</td><td>' . esc_html($job->status) . '</td><td>' . (int) $job->attempts . '</td><td>' . esc_html($channel_labels[$channel] ?? '—') . '</td><td>';
             if ('failed' === $job->status) {
                 echo esc_html($job->error_message);
                 echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '"><input type="hidden" name="action" value="masjidfeed_retry_push" /><input type="hidden" name="job_id" value="' . (int) $job->id . '" />';

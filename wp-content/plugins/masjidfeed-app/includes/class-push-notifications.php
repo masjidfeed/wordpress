@@ -26,6 +26,7 @@ class Masjid_Feed_Push_Notifications {
             notification_id CHAR(36) NOT NULL,
             post_id BIGINT(20) UNSIGNED NOT NULL,
             trigger_type VARCHAR(20) NOT NULL,
+            triggered_by BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
             dedupe_key VARCHAR(191) DEFAULT NULL,
             payload LONGTEXT NOT NULL,
             status VARCHAR(20) NOT NULL DEFAULT 'pending',
@@ -64,6 +65,7 @@ class Masjid_Feed_Push_Notifications {
                 'notification_id' => $notification_id,
                 'post_id' => absint($post_id),
                 'trigger_type' => sanitize_key($trigger_type),
+                'triggered_by' => (int) get_current_user_id(),
                 'dedupe_key' => $dedupe_key,
                 'payload' => wp_json_encode($payload),
                 'status' => 'pending',
@@ -71,7 +73,7 @@ class Masjid_Feed_Push_Notifications {
                 'created_at' => $now,
                 'updated_at' => $now,
             ),
-            array('%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s')
+            array('%s', '%d', '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s')
         );
         if (!$inserted) {
             return new WP_Error('masjidfeed_push_not_enqueued', __('The notification was already queued or could not be saved.', 'masjidfeed-app'));
