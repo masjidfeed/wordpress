@@ -1,6 +1,6 @@
 <?php
 /**
- * Push notification queue and post publishing integration.
+ * Push notification queue and manual send integration.
  */
 
 if (!defined('ABSPATH')) { exit; }
@@ -10,8 +10,6 @@ class Masjid_Feed_Push_Notifications {
     const MAX_ATTEMPTS = 5;
 
     public function __construct() {
-        add_action('transition_post_status', array($this, 'maybe_enqueue_first_publish'), 20, 3);
-        add_action('masjidfeed_maybe_enqueue_first_publish', array($this, 'enqueue_first_publish'));
         add_action('masjidfeed_process_push_job', array($this, 'process_job'));
         add_action('masjidfeed_cleanup_push_jobs', array($this, 'cleanup_jobs'));
         add_action('add_meta_boxes_post', array($this, 'add_meta_box'));
@@ -48,19 +46,6 @@ class Masjid_Feed_Push_Notifications {
         ) $charset_collate;";
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         dbDelta($sql);
-    }
-
-    public function maybe_enqueue_first_publish($new_status, $old_status, $post) {
-        if ('publish' !== $new_status || 'publish' === $old_status || 'post' !== $post->post_type) {
-            return;
-        }
-        wp_schedule_single_event(time() + 1, 'masjidfeed_maybe_enqueue_first_publish', array((int) $post->ID));
-    }
-
-    public function enqueue_first_publish($post_id) {
-        if ($this->post_is_eligible()) {
-            $this->enqueue($post_id, 'publish', 'publish:' . $post_id);
-        }
     }
 
     public function enqueue($post_id, $trigger_type, $dedupe_key = null) {
