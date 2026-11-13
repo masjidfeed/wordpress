@@ -7,9 +7,10 @@
 #   2. Checks out the plugin's SVN repository if no working copy exists yet.
 #   3. Copies the plugin source into the SVN working copy's "trunk" directory
 #      (excluding development-only files).
-#   4. Copies the plugin assets (icons, banners, screenshots) into the SVN
-#      working copy's "assets" directory and commits it (skipped when no
-#      assets directory exists).
+#   4. Copies the plugin assets (icons, banners, screenshots) from the
+#      repository-root "assets" directory into the SVN working copy's
+#      "assets" directory and commits it (skipped when no assets directory
+#      exists; only image files are synced).
 #   5. Commits trunk.
 #   6. Creates a "tags/<version>" copy from trunk and commits it
 #      (skipped with --no-tag).
@@ -125,6 +126,26 @@ TRUNK_DIR="$SVN_DIR/trunk"
 TAG_DIR="$SVN_DIR/tags/$VERSION"
 ASSETS_DIR="$REPO_ROOT/assets"
 
+# The assets directory may also contain notes and generator sources that must
+# not reach the WordPress.org assets folder; only images are synced.
+ASSETS_EXCLUDES=(
+    --exclude='*.md'
+    --exclude='*.txt'
+    --exclude='*.php'
+    --exclude='*.sh'
+)
+
+# WordPress.org renders the plugin page banner and icon from the assets
+# folder; warn when they are missing so placeholders are not forgotten.
+if [ -d "$ASSETS_DIR" ]; then
+    if ! ls "$ASSETS_DIR"/icon* >/dev/null 2>&1; then
+        echo "Warning: no icon found in $ASSETS_DIR (expected icon-256x256.png, icon.png or icon.svg)." >&2
+    fi
+    if ! ls "$ASSETS_DIR"/banner-1544x500.* >/dev/null 2>&1; then
+        echo "Warning: no banner-1544x500.* found in $ASSETS_DIR; the plugin page will have no banner." >&2
+    fi
+fi
+
 echo "Plugin slug : $PLUGIN_SLUG"
 echo "Version     : $VERSION"
 echo "Source      : $PLUGIN_DIR"
@@ -181,7 +202,11 @@ if [ "$DRY_RUN" -eq 1 ]; then
     echo
     if [ -d "$ASSETS_DIR" ]; then
         echo "Changes that would be synced into assets:"
-        rsync "${RSYNC_OPTS[@]}" --dry-run --itemize-changes "$ASSETS_DIR/" "$SVN_DIR/assets/"
+        if [ -d "$SVN_DIR/assets" ]; then
+            rsync "${RSYNC_OPTS[@]}" "${ASSETS_EXCLUDES[@]}" --dry-run --itemize-changes "$ASSETS_DIR/" "$SVN_DIR/assets/"
+        else
+            echo "  (SVN assets directory does not exist yet; it would be created with the files from $ASSETS_DIR)"
+        fi
     else
         echo "No assets directory found at $ASSETS_DIR, skipping assets."
     fi
@@ -223,7 +248,7 @@ if [ -d "$ASSETS_DIR" ]; then
         svn add "$SVN_ASSETS_DIR" >/dev/null
     fi
     echo "Syncing plugin assets..."
-    rsync "${RSYNC_OPTS[@]}" "$ASSETS_DIR/" "$SVN_ASSETS_DIR/"
+    rsync "${RSYNC_OPTS[@]}" "${ASSETS_EXCLUDES[@]}" "$ASSETS_DIR/" "$SVN_ASSETS_DIR/"
 
     echo "Staging changes in assets..."
     svn add --force "$SVN_ASSETS_DIR" >/dev/null
