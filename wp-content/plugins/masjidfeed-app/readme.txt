@@ -5,39 +5,13 @@ Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 8.1
 Requires Plugins: muslim-prayer-times
-Stable tag: 1.0.2
+Stable tag: 1.1.0
 License: MIT
 License URI: https://github.com/masjidfeed/wordpress/blob/main/LICENSE
 
 Your masjid's mobile app, powered by the WordPress site you already run. Prayer times, announcements, events, donations and push notifications - no new tools to learn.
 
 == Description ==
-
-<!--
-MAINTAINER NOTE - WordPress.org design assets (place in the plugin's `assets/` folder):
-
-* banner-1544x500.png and banner-772x250.png - hero banner at the top of the plugin page.
-  WHAT IT SHOULD BE: a wide, calm scene. Left third: an iPhone mockup of the MasjidFeed
-  home screen showing prayer times, iqamah times and a real masjid's logo and accent
-  color. Right two-thirds: a simplified WordPress card showing "Settings -> MasjidFeed
-  App", with a thin arrow flowing from WordPress to the phone - "publish on your site,
-  the app follows". Light background, brand colors, no small text. The 772x250 crop must
-  still read well.
-* icon-256x256.png - plugin icon (source: assets/masjidfeed-app-icon.png). App-icon style
-  mark that still reads at 64px.
-
-Lines marked [LOGO: …], [HERO: …] and [IMAGE: …] below are placeholders. Replace them
-with real <img> tags (or drop the corresponding files into assets/) before publishing.
--->
-
-[LOGO: MasjidFeed mark and wordmark, centered, roughly 600px wide, on transparent or white background]
-
-[HERO - WHAT IT SHOULD BE: a side-by-side composite on a light background. Left: an
-iPhone and an Android phone, both running MasjidFeed with the same masjid's logo,
-accent color, prayer times and iqamah times on the home screen. Right: a floating
-card showing the WordPress "Settings -> MasjidFeed App" screen. A subtle arrow flows
-from WordPress to the phones - one glance says "your website powers the app".
-Also crop a 1544x500 banner version of this scene for the WordPress.org assets.]
 
 MasjidFeed App turns your existing WordPress site into the content system for the
 MasjidFeed mobile app - a calm, native app for iOS and Android that your congregation
@@ -60,10 +34,6 @@ Everything lives in one place: **Settings -> MasjidFeed App**. Set your masjid's
 logo, splash screen, primary color (light and dark mode), contact details and social
 links once, and every copy of the app shows your masjid. Changes appear on phones the
 next time the app is started.
-
-[IMAGE - WHAT IT SHOULD BE: three phones side by side, each running MasjidFeed for a
-different masjid - different logo, different accent color, same familiar layout.
-Caption idea: "One app, your masjid's identity."]
 
 = Prayer times, without double entry =
 
@@ -104,10 +74,6 @@ Setup walkthrough: <a href="https://goodsoftware.foundation/p/masjidfeed/push-no
 Optionally pick a Friday category. On Fridays (in your site's timezone) the app shows
 only posts from that category - Khutbah topics, Jumu'ah logistics, Ramadan schedules -
 then returns to your regular filters afterwards. Set it once and forget it.
-
-[IMAGE - WHAT IT SHOULD BE: a phone on a Friday showing a Jumu'ah announcement card
-(e.g. "Jumu'ah 1:00 PM - Khutbah by …") with a small "Fri" calendar badge, next to a
-tiny WordPress editor showing the same post being published.]
 
 = Even your parking lot is in the app =
 
@@ -354,6 +320,9 @@ deploying to WordPress.org. The build prefixes dependencies under
 directory used at runtime.
 
 == Changelog ==
+
+= 1.0.0 =
+* Added support for seamless push notifications
 
 = 1.0.0 =
 * Initial release.

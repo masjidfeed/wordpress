@@ -3,12 +3,12 @@
  * Plugin Name: MasjidFeed App
  * Plugin URI: https://github.com/masjidfeed/wordpress
  * Description: WordPress backend for the MasjidFeed mobile app. Powers the app's config, prayer times, events, and announcements over a REST API.
- * Version: 1.0.2
+ * Version: 1.1.0
  * Author: stankovski
  * Author URI: https://goodsoftware.foundation/
  * Text Domain: masjidfeed-app
  * Requires at least: 6.0
- * Tested up to: 7.1
+ * Tested up to: 7.1.4
  * Requires PHP: 8.1
  * Requires Plugins: muslim-prayer-times
  * License: MIT
@@ -21,7 +21,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('MASJIDFEED_VERSION', '1.0.2');
+define('MASJIDFEED_VERSION', '1.1.0');
 define('MASJIDFEED_PLUGIN_FILE', __FILE__);
 define('MASJIDFEED_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('MASJIDFEED_PLUGIN_URL', plugin_dir_url(__FILE__));
