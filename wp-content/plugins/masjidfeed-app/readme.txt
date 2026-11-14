@@ -5,7 +5,7 @@ Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 8.1
 Requires Plugins: muslim-prayer-times
-Stable tag: 1.1.0
+Stable tag: 1.1.1
 License: MIT
 License URI: https://github.com/masjidfeed/wordpress/blob/main/LICENSE
 
@@ -191,12 +191,11 @@ Full walkthrough: https://goodsoftware.foundation/p/masjidfeed/push-notification
    and tags that feed the app.
 4. Push Notifications tab: MasjidFeed Push gateway registration, with delivery
    channels and Firebase credentials under Advanced.
-5. Debug tools: Validate connection, a test notification to a real device, and the
-   API and push traces with redacted payloads.
-6. Preview tab: the latest announcements as the mobile app will list them.
-7. Parking Map tab: zones and restriction schedules before saving.
-8. The mobile app: home screen with prayer times and the home-screen widget.
-9. The mobile app: announcements and events screens.
+5. Preview tab: the latest announcements as the mobile app will list them.
+6. The mobile app: home screen with prayer times and the home-screen widget.
+7. The mobile app: prayer times for the coming month.
+8. The mobile app: about us page.
+9. The mobile app: convenient homescreen widgets.
 
 == FAQ ==
 
