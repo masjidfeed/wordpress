@@ -92,7 +92,7 @@ appear in the app. No events plugin selected? The Events screen simply stays off
 
 Give a post your trigger tag and press publish: your congregation gets a notification
 with the title, a short body and the featured image. Behind the scenes delivery runs
-through Firebase Cloud Messaging - via the hosted push service, your own Firebase
+through Firebase Cloud Messaging - via the MasjidFeed Push gateway, your own Firebase
 project, or both. Failed sends retry with backoff, logs are kept for 30 days, and the
 Debug tools let you validate the connection and send a test to a real device before
 you go live.
@@ -185,6 +185,14 @@ for this tenant. The service account is encrypted with Sodium using a
 `MASJIDFEED_CREDENTIAL_KEY` constant or environment variable of at least 32
 characters. The key must not be stored in the WordPress database.
 
+By default, delivery runs through the hosted MasjidFeed Push gateway: press
+Enable and the site is registered with the gateway, which relays notifications
+through its own Firebase project. The gateway only relays notifications -
+neither device information nor notification content is ever stored by the
+gateway. The Advanced section holds the delivery settings and the optional
+custom Firebase Cloud Messaging tenant for an organization-specific mobile
+app.
+
 Publishing a post with the configured trigger tag queues one Firebase topic
 notification. Editors may send a tagged, published post again from its editor.
 Post notifications include the post's large featured image when available. The
@@ -215,8 +223,8 @@ Full walkthrough: https://goodsoftware.foundation/p/masjidfeed/push-notification
    optional Friday announcement category.
 3. Events and Announcements filters: choosing the events plugin and the categories
    and tags that feed the app.
-4. Push Notifications tab: delivery channels, Firebase credentials and the hosted
-   push service registration.
+4. Push Notifications tab: MasjidFeed Push gateway registration, with delivery
+   channels and Firebase credentials under Advanced.
 5. Debug tools: Validate connection, a test notification to a real device, and the
    API and push traces with redacted payloads.
 6. Preview tab: the latest announcements as the mobile app will list them.

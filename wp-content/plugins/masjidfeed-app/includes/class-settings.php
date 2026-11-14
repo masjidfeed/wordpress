@@ -512,10 +512,9 @@ CSS;
         // Legacy consumers (queue gating, /config, device registration) keep
         // reading push_enabled, so derive it from the selected mode.
         $out['push_enabled'] = self::PUSH_MODE_DISABLED === $mode ? 0 : 1;
-        // The tab saves through two forms — the delivery form (mode and deep
-        // link) and the FCM setup form. A submission that does not carry the
-        // deep-link field keeps the stored template; an empty field still
-        // clears it.
+        // The delivery settings and the FCM uploads save through the same
+        // form. A submission that does not carry the deep-link field keeps
+        // the stored template; an empty field still clears it.
         if (array_key_exists('push_deep_link_template', $input)) {
             $out['push_deep_link_template'] = $this->sanitize_deep_link_template(
                 $input['push_deep_link_template'],
@@ -826,36 +825,7 @@ CSS;
         ?>
         <h2 id="push-notifications"><?php esc_html_e('Push Notifications', 'masjidfeed-app'); ?></h2>
 
-        <form method="post" action="options.php" enctype="multipart/form-data">
-            <?php settings_fields(self::PUSH_OPTION_GROUP); ?>
-            <input type="hidden" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[_tab]" value="push" />
-
-            <table class="form-table" role="presentation">
-                <tr>
-                    <th scope="row"><label for="masjidfeed_push_mode"><?php esc_html_e('Push notifications', 'masjidfeed-app'); ?></label></th>
-                    <td>
-                        <select id="masjidfeed_push_mode" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[push_mode]">
-                            <option value="<?php echo esc_attr(self::PUSH_MODE_DISABLED); ?>" <?php selected($mode, self::PUSH_MODE_DISABLED); ?>><?php esc_html_e('Disabled', 'masjidfeed-app'); ?></option>
-                            <option value="<?php echo esc_attr(self::PUSH_MODE_MASJIDFEED); ?>" <?php selected($mode, self::PUSH_MODE_MASJIDFEED); ?> <?php disabled(!$masjidfeed_configured); ?>><?php esc_html_e('MasjidFeed', 'masjidfeed-app'); ?></option>
-                            <option value="<?php echo esc_attr(self::PUSH_MODE_FCM); ?>" <?php selected($mode, self::PUSH_MODE_FCM); ?> <?php disabled(!$fcm_configured); ?>><?php esc_html_e('FCM', 'masjidfeed-app'); ?></option>
-                            <option value="<?php echo esc_attr(self::PUSH_MODE_BOTH); ?>" <?php selected($mode, self::PUSH_MODE_BOTH); ?> <?php disabled(!$masjidfeed_configured || !$fcm_configured); ?>><?php esc_html_e('Both', 'masjidfeed-app'); ?></option>
-                        </select>
-                        <p class="description"><?php esc_html_e('MasjidFeed delivers through the hosted push service registered below. FCM delivers through your own Firebase project configured below. Both delivers through both channels. A channel that is not configured yet is disabled until its setup is complete.', 'masjidfeed-app'); ?></p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="masjidfeed_push_deep_link_template"><?php esc_html_e('Deep-link override', 'masjidfeed-app'); ?></label></th>
-                    <td>
-                        <input type="text" id="masjidfeed_push_deep_link_template" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[push_deep_link_template]" value="<?php echo esc_attr($opts['push_deep_link_template']); ?>" class="large-text code" placeholder="masjidapp://open/v1/masjids/{masjidId}/{type}/{postId}" />
-                        <p class="description"><?php esc_html_e('Optional. Supports {masjidId}, {postId}, {type}, and {slug}. Must use the masjidapp:// URI scheme; leave blank for the built-in event or announcement link.', 'masjidfeed-app'); ?></p>
-                    </td>
-                </tr>
-            </table>
-
-            <?php submit_button(); ?>
-        </form>
-
-        <p class="description" style="max-width:900px;"><?php esc_html_e('The MasjidFeed push service delivers notifications through the hosted MasjidFeed gateway, which holds the Firebase credentials for the MasjidApp apps. Registering verifies this site\'s domain and stores the issued secret in the settings; no Firebase project of your own is required.', 'masjidfeed-app'); ?></p>
+        <p class="description" style="max-width:900px;"><?php esc_html_e('Push notifications are delivered through the hosted MasjidFeed Push gateway, which holds the Firebase credentials for the MasjidApp apps — no Firebase project of your own is required. The gateway only relays notifications: neither device information nor notification content is ever stored by the gateway.', 'masjidfeed-app'); ?></p>
         <?php $pending = self::is_gateway_pending(); ?>
         <table class="form-table" role="presentation">
             <tr>
@@ -874,14 +844,10 @@ CSS;
         <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
             <input type="hidden" name="action" value="masjidfeed_register_gateway" />
             <?php wp_nonce_field('masjidfeed_register_gateway'); ?>
-            <p><?php submit_button($pending ? __('Validate', 'masjidfeed-app') : __('Register with MasjidFeed', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
-            <p class="description" style="max-width:900px;"><?php
-                if ($pending) {
-                    esc_html_e('Registration is pending: the push service could not verify this site\'s domain when it registered. Make sure the WordPress REST API is publicly reachable, then press Validate to retry — the push service re-fetches the challenge from the gateway-verification endpoint using this registration\'s fetch token (POST /v1/sites/{site_id}/verify). The pending registration expires 24 hours after it was created.', 'masjidfeed-app');
-                } else {
-                    esc_html_e('Registration publishes a one-time challenge at the gateway-verification REST endpoint, served only to the push service when it presents this registration’s fetch token; the service fetches it to verify this domain and issues the secret stored in the settings. If the service cannot reach this site, registration stays pending and pressing the button again retries verification.', 'masjidfeed-app');
-                }
-            ?></p>
+            <p><?php submit_button($pending ? __('Validate', 'masjidfeed-app') : __('Enable', 'masjidfeed-app'), 'secondary', 'submit', false); ?></p>
+            <?php if ($pending) : ?>
+                <p class="description" style="max-width:900px;"><?php esc_html_e('Registration is pending: the push service could not verify this site\'s domain when it registered. Make sure the WordPress REST API is publicly reachable, then press Validate to retry — the push service re-fetches the challenge from the gateway-verification endpoint using this registration\'s fetch token (POST /v1/sites/{site_id}/verify). The pending registration expires 24 hours after it was created.', 'masjidfeed-app'); ?></p>
+            <?php endif; ?>
         </form>
         <?php if (self::is_gateway_registered()) : ?>
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
@@ -897,9 +863,30 @@ CSS;
             <input type="hidden" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[_tab]" value="push" />
 
             <details id="masjidfeed_fcm_setup" style="max-width:900px;margin:16px 0;"<?php echo $fcm_section_open ? ' open' : ''; ?>>
-                <summary><strong><?php esc_html_e('Custom Firebase (FCM) setup', 'masjidfeed-app'); ?></strong></summary>
+                <summary><strong><?php esc_html_e('Advanced', 'masjidfeed-app'); ?></strong></summary>
                 <div style="padding:8px 0 0 20px;">
-                    <p class="description"><?php esc_html_e('Configure Firebase Cloud Messaging for this tenant. Uploaded credentials are validated and the service account is encrypted before storage.', 'masjidfeed-app'); ?></p>
+                    <p class="description"><?php esc_html_e('Use advanced settings to configure organization-specific Firebase Cloud Messaging tenant to use with custom mobile app. Uploaded credentials are validated and the service account is encrypted before storage.', 'masjidfeed-app'); ?></p>
+                    <table class="form-table" role="presentation">
+                        <tr>
+                            <th scope="row"><label for="masjidfeed_push_mode"><?php esc_html_e('Push notifications', 'masjidfeed-app'); ?></label></th>
+                            <td>
+                                <select id="masjidfeed_push_mode" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[push_mode]">
+                                    <option value="<?php echo esc_attr(self::PUSH_MODE_DISABLED); ?>" <?php selected($mode, self::PUSH_MODE_DISABLED); ?>><?php esc_html_e('Disabled', 'masjidfeed-app'); ?></option>
+                                    <option value="<?php echo esc_attr(self::PUSH_MODE_MASJIDFEED); ?>" <?php selected($mode, self::PUSH_MODE_MASJIDFEED); ?> <?php disabled(!$masjidfeed_configured); ?>><?php esc_html_e('MasjidFeed', 'masjidfeed-app'); ?></option>
+                                    <option value="<?php echo esc_attr(self::PUSH_MODE_FCM); ?>" <?php selected($mode, self::PUSH_MODE_FCM); ?> <?php disabled(!$fcm_configured); ?>><?php esc_html_e('FCM', 'masjidfeed-app'); ?></option>
+                                    <option value="<?php echo esc_attr(self::PUSH_MODE_BOTH); ?>" <?php selected($mode, self::PUSH_MODE_BOTH); ?> <?php disabled(!$masjidfeed_configured || !$fcm_configured); ?>><?php esc_html_e('Both', 'masjidfeed-app'); ?></option>
+                                </select>
+                                <p class="description"><?php esc_html_e('MasjidFeed delivers through the hosted MasjidFeed Push gateway. FCM delivers through your own Firebase project. Both delivers through both channels. A channel that is not configured yet is disabled until its setup is complete.', 'masjidfeed-app'); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="masjidfeed_push_deep_link_template"><?php esc_html_e('Deep-link override', 'masjidfeed-app'); ?></label></th>
+                            <td>
+                                <input type="text" id="masjidfeed_push_deep_link_template" name="<?php echo esc_attr(MASJIDFEED_OPTION_KEY); ?>[push_deep_link_template]" value="<?php echo esc_attr($opts['push_deep_link_template']); ?>" class="large-text code" placeholder="masjidapp://open/v1/masjids/{masjidId}/{type}/{postId}" />
+                                <p class="description"><?php esc_html_e('Optional. Supports {masjidId}, {postId}, {type}, and {slug}. Must use the masjidapp:// URI scheme; leave blank for the built-in event or announcement link.', 'masjidfeed-app'); ?></p>
+                            </td>
+                        </tr>
+                    </table>
                     <?php if (!Masjid_Feed_Credential_Store::is_available()) : ?>
                         <div class="notice notice-warning inline">
                             <p><strong><?php esc_html_e('Credential encryption is not configured.', 'masjidfeed-app'); ?></strong> <?php esc_html_e('Set MASJIDFEED_CREDENTIAL_KEY as described below before uploading the service-account file.', 'masjidfeed-app'); ?></p>
@@ -1029,9 +1016,40 @@ CSS;
         $logo_url = $branding['logoUrl'] ?? '';
         $masjid_name = $masjid['name'] ?? '';
         $ramadan_visible = !empty($config['featureFlags']['ramadan']) && !empty($config['ramadanUrl']);
+        // The app's prayer times come from the Muslim Prayer Times plugin's
+        // CSV endpoint, which reads its iqama table for the current month by
+        // default. Query that table directly instead of calling the endpoint:
+        // an HTTP loopback to the site's own REST URL fails in Docker setups,
+        // and the endpoint's callback echoes the CSV and exits, so an
+        // in-process REST call would end this page render once data exists.
+        global $wpdb;
+        $prayer_times_available = false;
+        if (function_exists('muslprti_salah_api_endpoint') && defined('MUSLPRTI_IQAMA_TABLE')) {
+            $iqama_table = $wpdb->prefix . MUSLPRTI_IQAMA_TABLE;
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- table existence probe on the dependency's table.
+            $table_exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $iqama_table));
+            if ($iqama_table === $table_exists) {
+                $prayer_times_sql = sprintf(
+                    'SELECT COUNT(*) FROM %s WHERE day >= %%s AND day <= %%s',
+                    esc_sql($iqama_table)
+                );
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- mirrors the CSV endpoint's current-month default range.
+                $prayer_times_count = $wpdb->get_var($wpdb->prepare($prayer_times_sql, muslprti_date('Y-m-01'), muslprti_date('Y-m-t')));
+                $prayer_times_available = (int) $prayer_times_count > 0;
+            }
+        }
         ?>
         <h2 id="masjidfeed-preview-heading"><?php esc_html_e('Preview', 'masjidfeed-app'); ?></h2>
         <p class="description" style="max-width:900px;"><?php esc_html_e('Simulates how the mobile app renders this site. The name, logo, colors, announcements, and the Ramadan page mirror the site\'s stored configuration — switch to this tab after changing settings. Prayer times are placeholders.', 'masjidfeed-app'); ?></p>
+        <?php if (!$prayer_times_available) : ?>
+            <div class="notice notice-warning inline" style="max-width:900px;">
+                <p>
+                    <strong><?php esc_html_e('Prayer times need to be configured and imported.', 'masjidfeed-app'); ?></strong>
+                    <?php esc_html_e('The app has no prayer times to display until prayer times are set up on this site.', 'masjidfeed-app'); ?>
+                    <a href="<?php echo esc_url(admin_url('options-general.php?page=muslprti-settings')); ?>"><?php esc_html_e('Set up prayer times', 'masjidfeed-app'); ?></a>
+                </p>
+            </div>
+        <?php endif; ?>
         <style>
             .masjidfeed-preview { --masjidfeed-primary: #1B7F5C; display: flex; justify-content: center; padding: 24px 0 8px; }
             .masjidfeed-preview__phone { width: 396px; max-width: 100%; background: #0b0b0c; border-radius: 58px; padding: 10px; box-shadow: 0 24px 60px rgba(0,0,0,.25); }

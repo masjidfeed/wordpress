@@ -91,29 +91,30 @@ class SettingsPushTabTest extends TestCase {
         $this->assertStringNotContainsString('masjidfeed_rotate_gateway_topic', $html);
         // The pending button retries verification (POST
         // /v1/sites/{site_id}/verify with the stored fetch token) instead of
-        // registering again, and the description explains the retry. The
-        // settings form's save button precedes it.
-        $this->assertSame('Validate', $GLOBALS['__test_submit_buttons'][1]['text']);
+        // registering again, and the description explains the retry. It is
+        // the first button on the tab.
+        $this->assertSame('Validate', $GLOBALS['__test_submit_buttons'][0]['text']);
         $this->assertStringContainsString('gateway-verification', $html);
         $this->assertStringContainsString('24 hours', $html);
     }
 
-    public function test_push_tab_shows_register_button_when_not_pending(): void {
+    public function test_push_tab_shows_enable_button_when_not_pending(): void {
         $this->render_push_tab();
 
-        // The settings form's save button comes first; the registration
-        // button follows it.
-        $this->assertNull($GLOBALS['__test_submit_buttons'][0]['text']);
-        $this->assertSame('Register with MasjidFeed', $GLOBALS['__test_submit_buttons'][1]['text']);
+        // The Enable button comes first; the settings form's save button
+        // follows at the end of the tab.
+        $this->assertSame('Enable', $GLOBALS['__test_submit_buttons'][0]['text']);
+        $this->assertNull($GLOBALS['__test_submit_buttons'][1]['text']);
 
         $this->store_gateway(['site_id' => 'site-1', 'secret' => 'secret-1']);
         $GLOBALS['__test_submit_buttons'] = [];
         $this->render_push_tab();
 
-        // The registration button keeps its label once registered; the
-        // rotate button follows it.
-        $this->assertSame('Register with MasjidFeed', $GLOBALS['__test_submit_buttons'][1]['text']);
-        $this->assertSame('Rotate topic keys', $GLOBALS['__test_submit_buttons'][2]['text']);
+        // The Enable button keeps its label once registered; the rotate
+        // button follows it, then the settings save.
+        $this->assertSame('Enable', $GLOBALS['__test_submit_buttons'][0]['text']);
+        $this->assertSame('Rotate topic keys', $GLOBALS['__test_submit_buttons'][1]['text']);
+        $this->assertNull($GLOBALS['__test_submit_buttons'][2]['text']);
     }
 
     public function test_gateway_pending_reflects_stored_state(): void {
@@ -131,42 +132,43 @@ class SettingsPushTabTest extends TestCase {
         $this->assertSame('disabled', Masjid_Feed_Settings::push_mode());
     }
 
-    public function test_push_tab_renders_mode_dropdown_first_and_drops_trigger_tag(): void {
+    public function test_push_tab_hides_mode_dropdown_inside_advanced_section_and_drops_trigger_tag(): void {
         $html = $this->render_push_tab();
 
-        // The dropdown is the first control on the tab: it appears before the
-        // hosted-service registration form and its description.
+        // The dropdown lives inside the Advanced section, below the
+        // hosted-gateway registration form.
         $dropdown_at = strpos($html, 'masjidfeed_push_mode');
         $registration_at = strpos($html, 'masjidfeed_register_gateway');
+        $advanced_at = strpos($html, 'masjidfeed_fcm_setup');
         $this->assertNotFalse($dropdown_at);
         $this->assertNotFalse($registration_at);
-        $this->assertLessThan($registration_at, $dropdown_at);
+        $this->assertNotFalse($advanced_at);
+        $this->assertLessThan($dropdown_at, $registration_at);
+        $this->assertLessThan($dropdown_at, $advanced_at);
         // The trigger tag is gone: any post can send once push is enabled.
         $this->assertStringNotContainsString('masjidfeed_push_tag', $html);
         $this->assertStringNotContainsString('Trigger tag', $html);
         // The removed section headers stay gone.
         $this->assertStringNotContainsString('MasjidFeed push service</h3>', $html);
         $this->assertStringNotContainsString('Delivery</h3>', $html);
-        // The registration block follows the settings form.
-        $this->assertStringContainsString('masjidfeed_register_gateway', $html);
     }
 
-    public function test_push_tab_places_registration_between_delivery_and_fcm_setup(): void {
+    public function test_push_tab_places_registration_before_advanced_section(): void {
         $html = $this->render_push_tab();
 
-        // Delivery fields come first, then the hosted-service registration
-        // block, then the Custom Firebase (FCM) setup section.
-        $delivery_at = strpos($html, 'masjidfeed_push_deep_link_template');
+        // The registration block comes first, then the Advanced section,
+        // which holds the delivery fields and the FCM setup.
         $registration_at = strpos($html, 'masjidfeed_register_gateway');
-        $fcm_at = strpos($html, 'masjidfeed_fcm_setup');
-        $this->assertNotFalse($delivery_at);
+        $advanced_at = strpos($html, 'masjidfeed_fcm_setup');
+        $delivery_at = strpos($html, 'masjidfeed_push_deep_link_template');
         $this->assertNotFalse($registration_at);
-        $this->assertNotFalse($fcm_at);
-        $this->assertLessThan($registration_at, $delivery_at);
-        $this->assertLessThan($fcm_at, $registration_at);
-        // The FCM uploads stay inside their own settings form: the tab saves
-        // through two settings forms (delivery, then FCM setup).
-        $this->assertSame(2, substr_count($html, 'action="options.php"'));
+        $this->assertNotFalse($advanced_at);
+        $this->assertNotFalse($delivery_at);
+        $this->assertLessThan($advanced_at, $registration_at);
+        $this->assertLessThan($delivery_at, $advanced_at);
+        // Delivery settings and FCM uploads save through a single settings
+        // form at the end of the tab.
+        $this->assertSame(1, substr_count($html, 'action="options.php"'));
     }
 
     private function mode_option(string $html, string $mode): string {
@@ -269,9 +271,10 @@ class SettingsPushTabTest extends TestCase {
         $this->assertTrue(Masjid_Feed_Settings::is_gateway_registered());
     }
 
-    public function test_fcm_form_save_preserves_delivery_settings(): void {
-        // The FCM setup form submits no delivery fields: the stored mode and
-        // deep-link template must survive its save.
+    public function test_sanitize_without_delivery_fields_preserves_delivery_settings(): void {
+        // A submission that carries no delivery fields (for example a
+        // programmatic partial save) must keep the stored mode and
+        // deep-link template.
         $this->store_settings(['push_mode' => 'both', 'push_deep_link_template' => 'masjidapp://open/{postId}']);
 
         $out = $this->sanitize([]);
@@ -280,9 +283,9 @@ class SettingsPushTabTest extends TestCase {
         $this->assertSame('masjidapp://open/{postId}', $out['push_deep_link_template']);
     }
 
-    public function test_delivery_form_save_preserves_firebase_configuration(): void {
-        // The delivery form submits no Firebase uploads: the stored
-        // configuration must survive its save.
+    public function test_sanitize_without_uploads_preserves_firebase_configuration(): void {
+        // A submission that carries no Firebase uploads: the stored
+        // configuration must survive the save.
         $GLOBALS['__test_options'][MASJIDFEED_CREDENTIAL_OPTION_KEY] = 'stored-credentials';
         $this->store_settings([
             'push_mode' => 'fcm',

@@ -181,7 +181,7 @@ $screenshots = [
     1 => ['size' => [1200, 750], 'text' => 'Settings - MasjidFeed App, General tab: masjid name, logo and splash logo, primary colors (light and dark mode), contact and social links.'],
     2 => ['size' => [1200, 750], 'text' => 'General tab continued: donation and Ramadan page URLs, feature flags, and the optional Friday announcement category.'],
     3 => ['size' => [1200, 750], 'text' => 'Events and Announcements filters: choosing the events plugin and the categories and tags that feed the app.'],
-    4 => ['size' => [1200, 750], 'text' => 'Push Notifications tab: delivery channels, Firebase credentials, and the hosted push service registration.'],
+    4 => ['size' => [1200, 750], 'text' => 'Push Notifications tab: MasjidFeed Push gateway registration, with delivery channels and Firebase credentials under Advanced.'],
     5 => ['size' => [1200, 750], 'text' => 'Debug tools: Validate connection, a test notification to a real device, and API and push traces with redacted payloads.'],
     6 => ['size' => [1200, 750], 'text' => 'Preview tab: the latest announcements exactly as the mobile app will list them.'],
     7 => ['size' => [1200, 750], 'text' => 'Parking Map tab: zones and restriction schedules before saving.'],
