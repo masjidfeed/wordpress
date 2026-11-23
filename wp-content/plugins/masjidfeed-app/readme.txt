@@ -5,7 +5,7 @@ Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 8.1
 Requires Plugins: muslim-prayer-times
-Stable tag: 1.1.1
+Stable tag: 1.1.2
 License: MIT
 License URI: https://github.com/masjidfeed/wordpress/blob/main/LICENSE
 
@@ -60,7 +60,7 @@ appear in the app. No events plugin selected? The Events screen simply stays off
 
 = Push notifications, in one click =
 
-Give a post your trigger tag and press publish: your congregation gets a notification
+Press Send notification on a published post: your congregation gets a notification
 with the title, a short body and the featured image. Behind the scenes delivery runs
 through Firebase Cloud Messaging - via the MasjidFeed Push gateway, your own Firebase
 project, or both. Failed sends retry with backoff, logs are kept for 30 days, and the
@@ -126,23 +126,6 @@ Start here:
 
 Full guide: https://goodsoftware.foundation/p/masjidfeed/getting-started/
 
-== Upgrading from Masjid App ==
-
-Install and activate MasjidFeed App before deleting the legacy Masjid App
-plugin. Activation imports the legacy settings, Firebase credentials, API trace
-setting, and retained trace entries. Values already configured in MasjidFeed
-App take precedence.
-
-The legacy plugin's uninstall handler deletes its stored options, so deleting
-it before activating MasjidFeed App leaves no settings to import. It is safe to
-deactivate the legacy plugin first, activate MasjidFeed App, verify the
-settings, and then delete the legacy plugin.
-
-Firebase credentials are decrypted with the previous
-`MASJIDAPP_CREDENTIAL_KEY` and re-encrypted for MasjidFeed App. Sites may keep
-using that legacy key name, although migrating the same value to
-`MASJIDFEED_CREDENTIAL_KEY` is recommended.
-
 == Push Notifications ==
 
 The **Settings -> MasjidFeed App -> Push Notifications** section accepts a Firebase
@@ -159,8 +142,9 @@ gateway. The Advanced section holds the delivery settings and the optional
 custom Firebase Cloud Messaging tenant for an organization-specific mobile
 app.
 
-Publishing a post with the configured trigger tag queues one Firebase topic
-notification. Editors may send a tagged, published post again from its editor.
+Editors send notifications from the post editor: pressing Send notification on a
+published post queues one Firebase topic notification. The same button can be used
+again later to re-send a post.
 Post notifications include the post's large featured image when available. The
 image must be publicly accessible over HTTPS. Android displays the FCM image
 directly; iOS requires a Notification Service Extension in the mobile app to
@@ -227,12 +211,6 @@ does not send notifications. You can add push later from the Push Notifications 
 The endpoints are cached with ETag and Cache-Control headers and store rendered
 payloads via the WordPress Transients API, so app traffic stays light.
 
-= I used the older "Masjid App" plugin. What do I do? =
-
-Install and activate MasjidFeed App first; activation imports your legacy settings,
-Firebase credentials and trace entries. Then verify, and only then delete the old
-plugin. Details are in the "Upgrading from Masjid App" section above.
-
 = Where do my Firebase credentials live? =
 
 Encrypted in your WordPress database with Sodium. The encryption key
@@ -259,9 +237,8 @@ What is sent and when:
   to obtain a short-lived Firebase access token. This happens whenever a
   notification is queued or a topic registration is processed and no
   unexpired token is cached.
-* **Firebase Cloud Messaging** (`fcm.googleapis.com`): when an admin publishes
-  a post that carries the configured trigger tag (or re-sends it from the post
-  editor), the notification payload is sent: the post title, an excerpt-style
+* **Firebase Cloud Messaging** (`fcm.googleapis.com`): when an admin presses
+  Send notification from the post editor, the notification payload is sent: the post title, an excerpt-style
   body, the publicly accessible featured-image URL (if set), the post URL or
   deep link, and the Firebase topic name. No visitor or subscriber data is
   sent by the plugin itself.
